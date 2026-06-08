@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+env/
+
+# Local config & secrets - NEVER commit these
+config.ini
+config.json
+.env
+*.key
+*.pem
+
+# Scan output is sensitive - it lists YOUR weak spots. Keep it out of git.
+reports/
+results/
+*.report
+scan-*.json
+scan-*.html
+*.log
