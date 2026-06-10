@@ -1,0 +1,121 @@
+# Builds the desktop app for all three platforms and publishes a GitHub Release.
+#
+# Trigger: push a version tag, e.g.
+#   git tag v1.0.0
+#   git push origin v1.0.0
+#
+# The release will contain:
+#   exposure-checker-macos.dmg      (drag-to-Applications installer)
+#   Exposure Checker.exe            (Windows standalone)
+#   exposure-checker-linux          (Linux standalone binary)
+
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            name: macOS
+          - os: windows-latest
+            name: Windows
+          - os: ubuntu-22.04
+            name: Linux
+
+    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.name }})
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # tkinter ships with python.org Windows/macOS builds but not Ubuntu
+      - name: Install tkinter (Linux only)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y python3-tk
+
+      - name: Install build dependencies
+        run: pip install pyinstaller cryptography
+
+      - name: Build app
+        run: pyinstaller exposure_checker.spec
+
+      # ── macOS: codesign (skipped — no cert) then wrap in .dmg ────────────────
+      - name: Package macOS .dmg
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p dist/dmg
+          cp -r "dist/Exposure Checker.app" dist/dmg/
+          hdiutil create \
+            -volname "Exposure Checker" \
+            -srcfolder dist/dmg \
+            -ov -format UDZO \
+            "dist/exposure-checker-macos.dmg"
+
+      # ── Upload per-platform artifact ──────────────────────────────────────────
+      - name: Upload macOS artifact
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: dist/exposure-checker-macos.dmg
+
+      - name: Upload Windows artifact
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: "dist/Exposure Checker.exe"
+
+      - name: Upload Linux artifact
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-bin
+          path: dist/exposure-checker
+
+  # ── Combine all artifacts into one GitHub Release ────────────────────────────
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Make Linux binary executable
+        run: chmod +x artifacts/linux-bin/exposure-checker
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Exposure Checker ${{ github.ref_name }}"
+          body: |
+            ## Download
+
+            | Platform | File | Notes |
+            |---|---|---|
+            | macOS | `exposure-checker-macos.dmg` | Open DMG → drag app to Applications |
+            | Windows | `Exposure Checker.exe` | Run as Administrator for full results |
+            | Linux | `exposure-checker-linux` | `chmod +x` then run |
+
+            ## What's new
+            <!-- fill in release notes here -->
+          files: |
+            artifacts/macos-dmg/exposure-checker-macos.dmg
+            artifacts/windows-exe/Exposure Checker.exe
+            artifacts/linux-bin/exposure-checker
+          fail_on_unmatched_files: true

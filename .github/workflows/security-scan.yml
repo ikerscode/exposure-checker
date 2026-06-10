@@ -1,0 +1,69 @@
+# Runs exposure-checker on the machine you own.
+#
+# REQUIREMENTS
+#   • A self-hosted runner registered on that machine (the tool scans localhost,
+#     so a GitHub-hosted runner would scan a throwaway VM — not useful).
+#     Label it "security-scanner", or change `runs-on` below to match your label.
+#   • The runner user needs read access to /etc/ssh/sshd_config and enough
+#     privilege for the local checks (firewall, listeners, etc.).
+#
+# SETUP (one-time)
+#   1. Register a self-hosted runner on your machine:
+#        https://github.com/<owner>/<repo>/settings/actions/runners/new
+#   2. Give it the label "security-scanner".
+#   3. Push this file; the first run will save the initial baseline.
+#
+# BASELINE PERSISTENCE
+#   The baseline lives at ~/.local/share/exposure-checker/baseline.json on the
+#   runner machine.  Because it is a persistent host the file survives between
+#   runs automatically — no artifact upload/download loop needed.
+
+name: Security Scan
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  scan:
+    name: Exposure scan
+    runs-on: [self-hosted, security-scanner]
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install exposure-checker
+        run: pip install --quiet -e .
+
+      - name: Run security scan
+        # --diff-baseline  shows only what changed since the last run.
+        # --save-baseline  updates the baseline so the *next* run diffs correctly.
+        # --fail-on high   exits 1 if any NEW HIGH or CRITICAL finding appeared.
+        # --output         saves the full report for the artifact step.
+        run: |
+          exposure-checker \
+            --full-audit \
+            --output report.json \
+            --diff-baseline \
+            --save-baseline \
+            --fail-on high
+
+      - name: Upload report
+        # Always upload so you can inspect the report even when the job fails.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report-${{ github.run_number }}
+          path: report.json
+          retention-days: 90

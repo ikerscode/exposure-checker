@@ -1,0 +1,3 @@
+[console_scripts]
+exposure-checker = exposure_checker:main
+exposure-checker-ui = exposure_checker_ui:main

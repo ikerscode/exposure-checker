@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: exposure-checker
+Version: 0.3.0
+Summary: Self-hosted security scanner: port scan, SSH audit, TLS cert expiry, CVE scan, and more
+License: MIT
+Requires-Python: >=3.9
+Requires-Dist: cryptography>=38
+Provides-Extra: dev
+Requires-Dist: pytest>=7; extra == "dev"
+Requires-Dist: pytest-mock>=3; extra == "dev"

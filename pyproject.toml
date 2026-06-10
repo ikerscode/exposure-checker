@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "exposure-checker"
+version = "1.0.0"
+description = "Self-hosted security scanner: port scan, SSH audit, auth log analysis, TLS cert expiry, CVE scan, and more"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+    "cryptography>=38",   # TLS certificate expiry (check_tls)
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "pytest-mock>=3",
+]
+
+[project.scripts]
+exposure-checker    = "exposure_checker:main"
+exposure-checker-ui = "exposure_checker_ui:main"
+
+[tool.setuptools]
+py-modules = ["exposure_checker", "exposure_checker_ui"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
