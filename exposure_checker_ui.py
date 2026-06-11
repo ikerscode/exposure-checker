@@ -29,6 +29,28 @@ from tkinter import filedialog, messagebox, ttk
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import exposure_checker as ec
 
+
+def _enable_windows_dpi_awareness():
+    """Tell Windows this process is DPI-aware so Tk renders crisp on HiDPI /
+    scaled displays instead of being bitmap-stretched (blurry)."""
+    if _UI_OS != "Windows":
+        return
+    try:
+        import ctypes
+        # PER_MONITOR_AWARE_V2 (-4); falls back to system-DPI aware on older OS.
+        try:
+            ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+        except (AttributeError, OSError):
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PER_MONITOR
+            except (AttributeError, OSError):
+                ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+
+_enable_windows_dpi_awareness()
+
 # ── Palette ────────────────────────────────────────────────────────────────────
 
 C = {
@@ -52,6 +74,8 @@ C = {
     "log_bg":     "#060a0f",
     "radar_bg":   "#05100d",
     "radar_grid": "#0b2419",
+    "hdr_bg":     "#0b1018",   # flat header — all header children match this
+    "pill":       "#16202c",   # subtle badge background
 }
 
 _SEV_ORDER   = ["CRITICAL", "HIGH", "MEDIUM", "REVIEW", "INFO"]
@@ -697,47 +721,104 @@ def _batch_fix_linux(cmds):
 
 
 def _batch_fix_macos(cmds):
-    """Single osascript administrator prompt for all fixes on macOS."""
-    results = []
+    """Single osascript administrator prompt for ALL fixes on macOS.
+
+    Previously each command spawned its own `do shell script ... with
+    administrator privileges` → one password dialog *per fix*. Now all
+    commands run inside one marker-tagged shell script behind one prompt.
+    """
+    lines = []
     for i, cmd in enumerate(cmds):
-        safe = cmd.replace("\\", "\\\\").replace('"', '\\"')
-        script = f'do shell script "{safe}" with administrator privileges'
+        lines.append(f'printf "\\n##ECCMD{i}##\\n"')
+        lines.append(f'{{ {cmd}; }} 2>&1')
+        lines.append(f'printf "##ECEXIT{i}:%d##\\n" "$?"')
+    fd, spath = tempfile.mkstemp(suffix=".sh", prefix="ec-fix-")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write("\n".join(lines) + "\n")
+        os.chmod(spath, 0o700)
+        safe = spath.replace("\\", "\\\\").replace('"', '\\"')
+        script = f'do shell script "/bin/bash \\"{safe}\\"" with administrator privileges'
+        r = subprocess.run(["osascript", "-e", script],
+                           capture_output=True, text=True, errors="replace",
+                           timeout=max(120, 60 * len(cmds)))
+        if r.returncode != 0 and "##ECCMD" not in r.stdout:
+            # User cancelled the auth dialog or osascript failed outright
+            msg = r.stderr.strip() or "authorization cancelled"
+            return [(c, 1, msg) for c in cmds]
+        return _parse_batch_output(cmds, r.stdout)
+    except subprocess.TimeoutExpired:
+        return [(c, 1, "timed out") for c in cmds]
+    except OSError as exc:
+        return [(c, 1, str(exc)) for c in cmds]
+    finally:
         try:
-            r = subprocess.run(
-                ["osascript", "-e", script],
-                capture_output=True, text=True, timeout=120,
-            )
-            results.append((cmd, r.returncode, (r.stdout + r.stderr).strip()))
-        except subprocess.TimeoutExpired:
-            results.append((cmd, 1, "timed out"))
-        except OSError as exc:
-            results.append((cmd, 1, str(exc)))
-    return results
+            os.unlink(spath)
+        except OSError:
+            pass
 
 
 def _batch_fix_windows(cmds):
-    """Run each fix command elevated via PowerShell Start-Process on Windows."""
-    results = []
-    for cmd in cmds:
-        safe = cmd.replace("'", "''")
-        ps = (
-            f"$p = Start-Process powershell.exe "
-            f"-ArgumentList '-Command','{safe}' "
+    """Single UAC prompt for ALL fixes on Windows.
+
+    Previously every fix command spawned its own elevated process → one UAC
+    consent dialog *per fix*. Now all commands run inside one elevated,
+    marker-tagged PowerShell script. Output is captured via a temp file
+    because Start-Process -Verb RunAs cannot pipe stdout back.
+    """
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    fd, script_path = tempfile.mkstemp(suffix=".ps1", prefix="ec-fix-")
+    out_path = script_path + ".out"
+    lines = ["$ErrorActionPreference = 'Continue'"]
+    for i, cmd in enumerate(cmds):
+        lines.append(f'Write-Output "##ECCMD{i}##"')
+        lines.append(f"& {{ {cmd} }} 2>&1 | Out-String -Stream")
+        lines.append("$code = $LASTEXITCODE; if ($null -eq $code) { if ($?) { $code = 0 } else { $code = 1 } }")
+        lines.append(f'Write-Output ("##ECEXIT{i}:" + $code + "##")')
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8-sig") as fh:
+            fh.write("\n".join(lines) + "\n")
+        runner = (
+            f"$p = Start-Process powershell.exe -ArgumentList "
+            f"'-NoProfile','-ExecutionPolicy','Bypass',"
+            f"'-File','\"{script_path}\"' "
+            f"-Verb RunAs -Wait -PassThru "
+            f"-RedirectStandardOutput '{out_path}'; $p.ExitCode"
+        )
+        # NOTE: -Verb RunAs + -RedirectStandardOutput is invalid together,
+        # so redirect inside the elevated script instead:
+        runner = (
+            f"$p = Start-Process powershell.exe -ArgumentList "
+            f"'-NoProfile','-ExecutionPolicy','Bypass','-Command',"
+            f"'& \"{script_path}\" *> \"{out_path}\"' "
             f"-Verb RunAs -Wait -PassThru; $p.ExitCode"
         )
+        r = subprocess.run(
+            ["powershell", "-NonInteractive", "-NoProfile", "-Command", runner],
+            capture_output=True, text=True, errors="replace",
+            timeout=max(120, 60 * len(cmds)), creationflags=no_window,
+        )
+        if "denied" in (r.stderr or "").lower() or "canceled" in (r.stderr or "").lower():
+            return [(c, 1, "UAC prompt declined") for c in cmds]
+        stdout = ""
         try:
-            r = subprocess.run(
-                ["powershell", "-NonInteractive", "-NoProfile", "-Command", ps],
-                capture_output=True, text=True, timeout=120,
-            )
-            rc_s = r.stdout.strip()
-            rc = int(rc_s) if rc_s.lstrip("-").isdigit() else r.returncode
-            results.append((cmd, rc, r.stderr.strip()))
-        except subprocess.TimeoutExpired:
-            results.append((cmd, 1, "timed out"))
-        except OSError as exc:
-            results.append((cmd, 1, str(exc)))
-    return results
+            with open(out_path, "r", encoding="utf-8", errors="replace") as fh:
+                stdout = fh.read()
+        except OSError:
+            pass
+        if "##ECCMD" not in stdout:
+            return [(c, 1, (r.stderr or "elevation failed").strip()) for c in cmds]
+        return _parse_batch_output(cmds, stdout)
+    except subprocess.TimeoutExpired:
+        return [(c, 1, "timed out") for c in cmds]
+    except OSError as exc:
+        return [(c, 1, str(exc)) for c in cmds]
+    finally:
+        for p in (script_path, out_path):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
 
 
 def _parse_batch_output(cmds, stdout):
@@ -784,13 +865,15 @@ def _show_fix_denied_dialog(root, findings):
     tk.Label(dlg, text="Admin Access Required",
              bg=C["panel"], fg=C["text"],
              font=("TkDefaultFont", 12, "bold")).pack(pady=(18, 4), padx=20)
-    tk.Label(dlg,
-             text="Run these commands in a terminal, or launch\n"
-                  "exposure-checker-ui with sudo to auto-apply.",
+    if _UI_OS == "Windows":
+        run_hint = "Run these commands in an elevated (Administrator) PowerShell."
+        cmds_text = "\n".join(all_cmds)
+    else:
+        run_hint = "Run these commands in a terminal, or launch\nexposure-checker-ui with sudo to auto-apply."
+        cmds_text = "\n".join(f"sudo {c}" for c in all_cmds)
+    tk.Label(dlg, text=run_hint,
              bg=C["panel"], fg=C["muted"],
              justify=tk.CENTER).pack(pady=(0, 10), padx=20)
-
-    cmds_text = "\n".join(f"sudo {c}" for c in all_cmds)
     txt = tk.Text(dlg, height=min(len(all_cmds) + 1, 10), width=58,
                   bg=C["log_bg"], fg=C["cmd"], font=("TkFixedFont", 9),
                   relief=tk.FLAT, wrap=tk.NONE, padx=8, pady=6)
@@ -919,12 +1002,17 @@ class _FindingsPane:
                              event.width // 2, event.height // 2)
 
     def _on_scroll(self, event):
-        if event.num == 4:
+        if event.num == 4:                       # X11 wheel up
             self._canvas.yview_scroll(-1, "units")
-        elif event.num == 5:
+        elif event.num == 5:                     # X11 wheel down
             self._canvas.yview_scroll(1, "units")
-        else:
-            self._canvas.yview_scroll(int(-event.delta / 60), "units")
+        elif _UI_OS == "Darwin":
+            # macOS reports small deltas (±1..3 per trackpad event);
+            # int(delta/60) truncated to 0 → scrolling was completely dead.
+            self._canvas.yview_scroll(-int(event.delta), "units")
+        else:                                    # Windows: multiples of ±120
+            step = int(-event.delta / 120) or (-1 if event.delta > 0 else 1)
+            self._canvas.yview_scroll(step, "units")
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -1500,7 +1588,8 @@ class ScanTab:
             messagebox.showinfo("No report", "Run a scan first.")
             return
         if self._last_html and os.path.exists(self._last_html):
-            webbrowser.open(f"file://{self._last_html}")
+            import pathlib
+            webbrowser.open(pathlib.Path(self._last_html).resolve().as_uri())
         else:
             messagebox.showinfo("Not ready", "Report not yet generated.")
 
@@ -1714,7 +1803,8 @@ class App:
 
         # ── Header ────────────────────────────────────────────────────────────
         HDR_H = 64
-        hdr_canvas = tk.Canvas(r, height=HDR_H, bg="#0d1117",
+        _HB = C["hdr_bg"]
+        hdr_canvas = tk.Canvas(r, height=HDR_H, bg=_HB,
                                 highlightthickness=0)
         hdr_canvas.pack(fill=tk.X)
 
@@ -1723,58 +1813,67 @@ class App:
             if w < 2:
                 return
             hdr_canvas.delete("bg")
-            # Subtle left→right gradient: dark navy to slightly bluer
-            steps = 32
-            for i in range(steps):
-                x0 = int(i / steps * w)
-                x1 = int((i + 1) / steps * w) + 1
-                t  = i / steps
-                rr = int(0x0d + t * 4)
-                gg = int(0x11 + t * 8)
-                bb = int(0x17 + t * 20)
-                hdr_canvas.create_rectangle(x0, 0, x1, HDR_H,
-                    fill=f"#{rr:02x}{gg:02x}{bb:02x}", outline="", tags="bg")
+            # Flat premium fill — keeps every embedded sub-canvas (logo, gull)
+            # perfectly seamless instead of boxed against a gradient.
+            hdr_canvas.create_rectangle(0, 0, w, HDR_H,
+                fill=_HB, outline="", tags="bg")
+            # Soft cyan glow in the far-right corner (away from the mascot)
+            for gi, k in enumerate((0.05, 0.035, 0.02)):
+                rr = int(0x0b + (0x00 - 0x0b) * 0)   # keep hue; brighten toward accent
+                gg = int(0x10 + 0x40 * k * 4)
+                bb = int(0x18 + 0x60 * k * 4)
+                pad = 60 + gi * 50
+                hdr_canvas.create_oval(w - pad, HDR_H - pad // 2,
+                                       w + pad // 2, HDR_H + pad,
+                                       fill=f"#{min(rr,255):02x}{min(gg,255):02x}{min(bb,255):02x}",
+                                       outline="", tags="bg")
             # Accent line at bottom
             hdr_canvas.create_rectangle(0, HDR_H - 2, w, HDR_H,
                 fill=C["accent"], outline="", tags="bg")
+            hdr_canvas.tag_lower("bg")
 
         hdr_canvas.bind("<Configure>", _paint_hdr)
         hdr_canvas.after(10, _paint_hdr)
 
         # Diamond logo
         logo = tk.Canvas(hdr_canvas, width=28, height=28,
-                         bg="#0d1117", highlightthickness=0)
+                         bg=_HB, highlightthickness=0)
         hdr_canvas.create_window(18, HDR_H // 2, window=logo, anchor="w")
         logo.create_polygon(14, 1, 27, 14, 14, 27, 1, 14,
                             fill=C["accent"], outline="")
 
         # Title block
-        title_f = tk.Frame(hdr_canvas, bg="#0d1117")
+        title_f = tk.Frame(hdr_canvas, bg=_HB)
         hdr_canvas.create_window(56, HDR_H // 2, window=title_f, anchor="w")
         tk.Label(title_f, text="Exposure Checker",
-                 bg="#0d1117", fg=C["text"],
+                 bg=_HB, fg=C["text"],
                  font=("TkDefaultFont", 14, "bold")).pack(anchor="w")
-        tk.Label(title_f, text="Security scanner for systems you own",
-                 bg="#0d1117", fg=C["muted"],
+        tk.Label(title_f, text="Scan · Protect · Clean",
+                 bg=_HB, fg=C["muted"],
                  font=("TkDefaultFont", 8)).pack(anchor="w")
 
         # Animated seagull mascot (right of title)
         GULL_W, GULL_H = 90, 58
         self._hdr_gull = tk.Canvas(hdr_canvas, width=GULL_W, height=GULL_H,
-                                    bg="#0d1117", highlightthickness=0)
+                                    bg=_HB, highlightthickness=0)
         hdr_canvas.create_window(310, HDR_H // 2,
                                   window=self._hdr_gull, anchor="w")
         self._hdr_gull_phase = 0.0
         self._animate_hdr_gull()
 
-        # Version / admin label (pinned right via a separate window)
-        root_note = "  ADMIN" if _is_root() else f"  {_UI_OS}"
-        ver_lbl = tk.Label(hdr_canvas,
-                           text=f"v{ec.__version__}{root_note}",
-                           bg="#0d1117", fg=C["muted"],
-                           font=("TkDefaultFont", 8))
+        # Version + privilege pill (pinned right)
+        priv = "ADMIN" if _is_root() else "STANDARD"
+        priv_fg = C["ok"] if _is_root() else C["muted"]
+        pill = tk.Frame(hdr_canvas, bg=C["pill"], highlightthickness=1,
+                        highlightbackground=C["border"])
+        tk.Label(pill, text=f"v{ec.__version__}", bg=C["pill"], fg=C["muted"],
+                 font=("TkDefaultFont", 8), padx=6, pady=2).pack(side=tk.LEFT)
+        tk.Label(pill, text="•", bg=C["pill"], fg=C["border"],
+                 font=("TkDefaultFont", 8)).pack(side=tk.LEFT)
+        tk.Label(pill, text=priv, bg=C["pill"], fg=priv_fg,
+                 font=("TkDefaultFont", 8, "bold"), padx=6, pady=2).pack(side=tk.LEFT)
         self._hdr_ver_win = hdr_canvas.create_window(
-            9999, HDR_H // 2, window=ver_lbl, anchor="e")
+            9999, HDR_H // 2, window=pill, anchor="e")
 
         def _pin_ver(event=None):
             hdr_canvas.coords(self._hdr_ver_win,
@@ -1957,6 +2056,7 @@ class App:
 
     def _run_cleaner(self, reporter):
         ec.check_system_cleaner(reporter)
+        ec.check_startup(reporter)
 
     # ── Shared helpers ────────────────────────────────────────────────────────
 
@@ -2168,28 +2268,39 @@ def _draw_gull_icon(cnv, cx, cy, flap=0.0, scale=1.0,
 # ── Venice splash animation ─────────────────────────────────────────────────────
 
 class VeniceSplash:
-    """Animated startup splash: seagull flies over a Venice dusk skyline."""
+    """Third-person flythrough: the camera follows a seagull gliding down a
+    Venetian canal at dusk — one-point perspective, scrolling facades, lit
+    windows reflected in the water."""
 
-    W, H = 580, 310
-    _DURATION = 3.2   # seconds total
+    W, H = 640, 360
+    _DURATION = 4.2   # seconds total
     _FADE_IN  = 0.35
-    _FADE_OUT = 0.45
-    _TICK_MS  = 40    # ~25 fps
+    _FADE_OUT = 0.50
+    _TICK_MS  = 36    # ~28 fps
 
     _SKY_STOPS = [
         (0.00, "#06021a"),
-        (0.25, "#150c38"),
-        (0.50, "#4a1640"),
-        (0.68, "#b03030"),
-        (0.80, "#d86028"),
-        (0.90, "#f0a020"),
+        (0.30, "#150c38"),
+        (0.55, "#4a1640"),
+        (0.72, "#b03030"),
+        (0.84, "#d86028"),
+        (0.93, "#f0a020"),
         (1.00, "#ffc840"),
     ]
+
+    # Camera / projection
+    _F        = 240.0   # focal length (px)
+    _CANAL_HW = 2.3     # canal half-width (world units)
+    _CAM_H    = 1.6     # camera height above water
+    _NEAR     = 0.9
+    _FAR      = 34.0
+    _SPEED    = 6.5     # world units / second forward
 
     def __init__(self, root):
         self._root  = root
         self._alive = True
         self._t     = 0.0
+        self._z_cam = 0.0
 
         win = tk.Toplevel(root)
         win.overrideredirect(True)
@@ -2210,8 +2321,13 @@ class VeniceSplash:
         except Exception:
             self._can_alpha = False
 
-        self._draw_background()
+        self._hz = int(self.H * 0.46)           # horizon line
+        self._rng = random.Random(42)
+        self._segments = self._gen_segments()
+        self._draw_sky()
         self._tick()
+
+    # ── Static sky (drawn once) ───────────────────────────────────────────────
 
     @staticmethod
     def _lerp(stops, frac):
@@ -2219,181 +2335,246 @@ class VeniceSplash:
             y0, c0 = stops[i]
             y1, c1 = stops[i + 1]
             if y0 <= frac <= y1:
-                t  = (frac - y0) / (y1 - y0) if y1 > y0 else 0.0
-                r  = int(int(c0[1:3], 16) + t * (int(c1[1:3], 16) - int(c0[1:3], 16)))
-                g  = int(int(c0[3:5], 16) + t * (int(c1[3:5], 16) - int(c0[3:5], 16)))
-                b  = int(int(c0[5:7], 16) + t * (int(c1[5:7], 16) - int(c0[5:7], 16)))
+                t = (frac - y0) / (y1 - y0) if y1 > y0 else 0.0
+                r = int(int(c0[1:3], 16) + t * (int(c1[1:3], 16) - int(c0[1:3], 16)))
+                g = int(int(c0[3:5], 16) + t * (int(c1[3:5], 16) - int(c0[3:5], 16)))
+                b = int(int(c0[5:7], 16) + t * (int(c1[5:7], 16) - int(c0[5:7], 16)))
                 return f"#{r:02x}{g:02x}{b:02x}"
         return stops[-1][1]
 
-    def _draw_background(self):
-        cnv  = self._cnv
-        w, h = self.W, self.H
-        gy   = int(h * 0.62)   # horizon y
+    @staticmethod
+    def _shade(hexcol, k):
+        """Darken/brighten a #rrggbb colour by factor k."""
+        r = max(0, min(255, int(int(hexcol[1:3], 16) * k)))
+        g = max(0, min(255, int(int(hexcol[3:5], 16) * k)))
+        b = max(0, min(255, int(int(hexcol[5:7], 16) * k)))
+        return f"#{r:02x}{g:02x}{b:02x}"
 
-        # Sky gradient
-        bands = 48
+    def _draw_sky(self):
+        cnv, w, hz = self._cnv, self.W, self._hz
+        bands = 44
         for i in range(bands):
-            y0    = int(i / bands * gy)
-            y1    = int((i + 1) / bands * gy) + 1
-            color = self._lerp(self._SKY_STOPS, i / bands)
-            cnv.create_rectangle(0, y0, w, y1, fill=color, outline=color)
-
-        # Stars
+            y0 = int(i / bands * hz)
+            y1 = int((i + 1) / bands * hz) + 1
+            cnv.create_rectangle(0, y0, w, y1, outline="",
+                                 fill=self._lerp(self._SKY_STOPS, i / bands))
         rng = random.Random(7)
-        for _ in range(70):
-            sx = rng.randint(0, w)
-            sy = rng.randint(0, int(gy * 0.55))
-            b  = rng.randint(140, 240)
-            cnv.create_oval(sx - 1, sy - 1, sx + 1, sy + 1,
-                            fill=f"#{b:02x}{b:02x}{min(b+30,255):02x}",
-                            outline="")
+        for _ in range(55):
+            sx, sy = rng.randint(0, w), rng.randint(0, int(hz * 0.5))
+            b = rng.randint(140, 235)
+            cnv.create_oval(sx - 1, sy - 1, sx + 1, sy + 1, outline="",
+                            fill=f"#{b:02x}{b:02x}{min(b+30,255):02x}")
+        # Low sun glow at the vanishing point
+        vx = w // 2
+        for gr, col in ((46, "#7a3418"), (30, "#c05a1c"), (16, "#f0a23a"), (8, "#ffd980")):
+            cnv.create_oval(vx - gr, hz - gr // 2 - 6, vx + gr, hz + gr // 2 - 6,
+                            fill=col, outline="")
+        # Static water base
+        cnv.create_rectangle(0, hz, w, self.H, fill="#071226", outline="")
 
-        # Moon
-        mx, my, mr = w - 80, 52, 20
-        for gr in (30, 25, 20):
-            frac = (gr - 20) / 12
-            gc   = int(255 * (1 - frac * 0.88))
-            cnv.create_oval(mx - gr, my - gr, mx + gr, my + gr,
-                            fill=f"#{gc:02x}{min(gc+18,255):02x}{gc:02x}",
-                            outline="")
-        cnv.create_oval(mx - mr, my - mr, mx + mr, my + mr,
-                        fill="#fff8d0", outline="")
+    # ── World generation ──────────────────────────────────────────────────────
 
-        # Horizon glow bands
-        for gi in range(22):
-            yr = gy - gi * 2
-            t  = gi / 22
-            r  = int(240 - t * 200)
-            g  = int(100 - t * 80)
-            b2 = int(20  - t * 14)
-            cnv.create_rectangle(0, yr, w, yr + 2,
-                                  fill=f"#{r:02x}{g:02x}{b2:02x}", outline="")
+    _FACADE_COLS = ["#3a2430", "#402a22", "#2e2436", "#38301f", "#341f28", "#2b2a3c"]
 
-        # Water
-        cnv.create_rectangle(0, gy, w, h, fill="#040e1e", outline="")
+    def _gen_segment(self, z0):
+        rng = self._rng
+        return {
+            "z0": z0,
+            "len": rng.uniform(2.2, 4.0),
+            "lh": rng.uniform(2.6, 5.2),      # left facade height
+            "rh": rng.uniform(2.6, 5.2),      # right facade height
+            "lc": rng.choice(self._FACADE_COLS),
+            "rc": rng.choice(self._FACADE_COLS),
+            "lwin": rng.randint(1, 3),        # lit window rows
+            "rwin": rng.randint(1, 3),
+            "pole": rng.random() < 0.55,      # mooring pole on this segment
+            "pole_side": rng.choice((-1, 1)),
+            "arch": rng.random() < 0.10,      # bridge arch across the canal
+        }
 
-        # Water shimmer
-        for i in range(10):
-            wy2 = gy + 8 + i * 13
-            for xi in range(0, w, rng.randint(35, 55)):
-                cnv.create_line(xi, wy2, xi + rng.randint(8, 22), wy2,
-                                fill="#162848", width=1)
+    def _gen_segments(self):
+        segs, z = [], self._NEAR
+        while z < self._FAR + 6:
+            s = self._gen_segment(z)
+            segs.append(s)
+            z += s["len"]
+        return segs
 
-        # ── Building silhouettes ─────────────────────────────────────────────
-        col_far  = "#0c0e14"   # far buildings
-        col_near = "#080a10"   # near buildings
+    # ── Projection helpers ────────────────────────────────────────────────────
 
-        def rect(x1, y1, x2, y2, col=col_near):
-            cnv.create_rectangle(x1, y1, x2, y2, fill=col, outline=col)
-        def poly(*pts, col=col_near):
-            cnv.create_polygon(*pts, fill=col, outline=col)
+    def _proj(self, x, y, z):
+        """World (x right, y up from water, z forward) → screen."""
+        s = self._F / z
+        sx = self.W / 2 + x * s
+        sy = self._hz - (y - self._CAM_H) * s
+        return sx, sy, s
 
-        # Far skyline layer
-        for (x1, y1, x2) in [
-            (0, 52, 70), (65, 38, 150), (145, 58, 230),
-            (225, 28, 315), (310, 48, 390), (385, 42, 465), (460, 52, 580),
-        ]:
-            rect(x1, y1, x2, gy, col=col_far)
+    # ── Per-frame scene ───────────────────────────────────────────────────────
 
-        # Campanile (tall bell tower, left)
-        tx = 60
-        ty = gy - 168
-        rect(tx - 11, ty, tx + 11, gy)
-        rect(tx - 14, ty - 8, tx + 14, ty)
-        rect(tx - 9,  ty - 26, tx + 9, ty - 8)
-        poly(tx - 14, ty - 8, tx, ty - 50, tx + 14, ty - 8)
-        rect(tx - 3,  ty - 50, tx + 3, ty - 62)  # lantern
-        poly(tx - 4, ty - 62, tx + 4, ty - 62, tx, ty - 74)
+    def _draw_scene(self):
+        cnv = self._cnv
+        cnv.delete("scene")
+        zc = self._z_cam
 
-        # Dome church (Santa Maria style)
-        dx, db = 155, gy - 58
-        poly(95, db, 95, gy, 215, gy, 215, db,
-             200, db - 18, 185, db - 32, 155, db - 52,
-             125, db - 32, 110, db - 18, col=col_near)
-        # Drum + dome
-        cnv.create_arc(112, db - 96, 198, db - 8,
-                       start=0, extent=180, fill=col_near, outline=col_near)
-        rect(148, db - 96, 162, db - 108)
-        poly(147, db - 108, 163, db - 108, 155, db - 124)
-        # Side belfries
-        for bx in (102, 206):
-            rect(bx - 6, db - 30, bx + 6, db)
-            poly(bx - 6, db - 30, bx, db - 42, bx + 6, db - 30)
+        # Recycle segments that passed the camera; extend the far end
+        while self._segments and self._segments[0]["z0"] + self._segments[0]["len"] - zc < self._NEAR:
+            self._segments.pop(0)
+        far_end = self._segments[-1]["z0"] + self._segments[-1]["len"] if self._segments else zc + self._NEAR
+        while far_end - zc < self._FAR:
+            s = self._gen_segment(far_end)
+            self._segments.append(s)
+            far_end += s["len"]
 
-        # Arched bridge (Rialto style)
-        bx0, bx1 = 240, 340
-        bxm = (bx0 + bx1) // 2
-        arch_h = 40
-        poly(bx0, gy, bx0, gy - 14, bx0 + 8, gy - 20,
-             bx0 + 20, gy - 30, bxm, gy - arch_h - 4,
-             bx1 - 20, gy - 30, bx1 - 8, gy - 20,
-             bx1, gy - 14, bx1, gy, col=col_near)
-        # Arch opening
-        cnv.create_arc(bx0 + 18, gy - arch_h * 2 + 6,
-                       bx1 - 18, gy - 8,
-                       start=0, extent=180, fill="#040e1e", outline="")
-        # Railings
-        for ri in range(6):
-            rx = bx0 + 28 + ri * 14
-            rect(rx, gy - arch_h - 12, rx + 3, gy - arch_h - 20)
+        hw = self._CANAL_HW
+        # Far → near so close facades paint over distant ones
+        for seg in reversed(self._segments):
+            z0 = max(seg["z0"] - zc, self._NEAR)
+            z1 = max(seg["z0"] + seg["len"] - zc, self._NEAR + 0.01)
+            if z0 >= self._FAR:
+                continue
+            z1 = min(z1, self._FAR)
+            fog = max(0.22, 1.0 - (z0 / self._FAR) * 0.9)   # distance dimming
 
-        # Right cluster buildings
-        rect(350, gy - 88, 430, gy)
-        rect(360, gy - 110, 410, gy - 88)
-        poly(360, gy - 110, 385, gy - 132, 410, gy - 110)
-        # Tall window arch on right cluster
-        cnv.create_arc(370, gy - 106, 400, gy - 82,
-                       start=0, extent=180, fill="#06101e", outline="")
+            for side, height, col, wins in (
+                (-1, seg["lh"], seg["lc"], seg["lwin"]),
+                (+1, seg["rh"], seg["rc"], seg["rwin"]),
+            ):
+                x = side * hw
+                bx0, by0, _ = self._proj(x, 0, z0)          # waterline near
+                bx1, by1, _ = self._proj(x, 0, z1)          # waterline far
+                tx0, ty0, _ = self._proj(x, height, z0)     # rooftop near
+                tx1, ty1, _ = self._proj(x, height, z1)     # rooftop far
+                fc = self._shade(col, fog)
+                cnv.create_polygon(bx0, by0, bx1, by1, tx1, ty1, tx0, ty0,
+                                   fill=fc, outline=self._shade(fc, 0.8),
+                                   tags="scene")
+                # Lit windows + their water reflection
+                if z0 < 18:
+                    for wi in range(wins):
+                        wz = z0 + (z1 - z0) * (0.25 + 0.5 * wi / max(1, wins - 1) if wins > 1 else 0.5)
+                        wy = height * (0.35 + 0.18 * wi)
+                        wx, wys, s = self._proj(x, wy, wz)
+                        r = max(1, int(s * 0.10))
+                        warm = "#ffce6a" if (wi + seg["lwin"]) % 2 else "#ffb04a"
+                        cnv.create_rectangle(wx - r, wys - r * 1.4, wx + r, wys + r * 1.4,
+                                             fill=self._shade(warm, fog), outline="",
+                                             tags="scene")
+                        rx, rys, _ = self._proj(x * 0.92, -wy * 0.35, wz)
+                        cnv.create_line(rx - r, rys, rx + r, rys,
+                                        fill=self._shade("#a96f2e", fog), tags="scene")
 
-        # Second tower (right)
-        tx2 = 490
-        ty2 = gy - 140
-        rect(tx2 - 9, ty2, tx2 + 9, gy)
-        rect(tx2 - 12, ty2 - 8, tx2 + 12, ty2)
-        rect(tx2 - 7,  ty2 - 22, tx2 + 7, ty2 - 8)
-        poly(tx2 - 12, ty2 - 8, tx2, ty2 - 40, tx2 + 12, ty2 - 8)
-        rect(tx2 - 2, ty2 - 40, tx2 + 2, ty2 - 50)
+            # Mooring pole rising out of the water
+            if seg["pole"] and z0 < 16:
+                px = seg["pole_side"] * (hw - 0.45)
+                pz = (z0 + z1) / 2
+                x0, y0, s = self._proj(px, 0, pz)
+                x1, y1, _ = self._proj(px, 1.5, pz)
+                wpx = max(1, int(s * 0.05))
+                cnv.create_line(x0, y0, x1, y1, width=wpx * 2,
+                                fill=self._shade("#1c2f50", max(0.4, 1 - pz / 20)),
+                                tags="scene")
+                cnv.create_oval(x1 - wpx * 2, y1 - wpx * 2, x1 + wpx * 2, y1 + wpx * 2,
+                                fill="#24406a", outline="", tags="scene")
 
-        # Far right small buildings
-        rect(430, gy - 60, 470, gy)
-        rect(540, gy - 72, 580, gy)
+            # Bridge arch spanning the canal — drawn as a thin stone band that
+            # follows an arc, leaving the water open underneath (a Rialto-style
+            # silhouette rather than a solid block).
+            if seg["arch"] and self._NEAR + 3 < z0 < 20:
+                az = (z0 + z1) / 2
+                fogc = self._shade("#241620", max(0.35, 1 - az / 22))
+                deck_h, rise = 2.2, 1.5     # springer height, crown rise
+                steps = 14
+                top_pts, bot_pts = [], []
+                for k in range(steps + 1):
+                    u = k / steps                       # 0..1 across canal
+                    wx = (-1 + 2 * u) * hw
+                    wy = deck_h + math.sin(u * math.pi) * rise
+                    sx, sy, _ = self._proj(wx, wy, az)
+                    top_pts.append((sx, sy))
+                    sx2, sy2, _ = self._proj(wx, wy - 0.45, az)  # band thickness
+                    bot_pts.append((sx2, sy2))
+                band = top_pts + list(reversed(bot_pts))
+                flat = [c for p in band for c in p]
+                cnv.create_polygon(*flat, fill=fogc,
+                                   outline=self._shade(fogc, 1.3),
+                                   smooth=True, tags="scene")
+                # A couple of railing posts on the crown
+                for u in (0.42, 0.5, 0.58):
+                    wx = (-1 + 2 * u) * hw
+                    wy = deck_h + math.sin(u * math.pi) * rise
+                    x0, y0, s = self._proj(wx, wy, az)
+                    x1, y1, _ = self._proj(wx, wy + 0.35, az)
+                    cnv.create_line(x0, y0, x1, y1,
+                                    fill=self._shade("#2e1f2a", max(0.4, 1 - az / 22)),
+                                    tags="scene")
 
-        # Gondola poles in water
-        pole_col = "#0d1c38"
-        for px in (35, 110, 195, 295, 375, 450, 525):
-            cnv.create_rectangle(px - 2, gy, px + 2, gy + 65,
-                                 fill=pole_col, outline=pole_col)
-            # Small ball finial
-            cnv.create_oval(px - 4, gy - 4, px + 4, gy + 4,
-                            fill=pole_col, outline="")
+        # Canal waterline edges converging on the vanishing point
+        for side in (-1, 1):
+            x0, y0, _ = self._proj(side * hw, 0, self._NEAR)
+            x1, y1, _ = self._proj(side * hw, 0, self._FAR)
+            cnv.create_line(x0, y0, x1, y1, fill="#13284a", width=2, tags="scene")
 
-        # Gondola silhouette (bottom-left water)
-        gx, ghy = 30, gy + 50
-        poly(gx, ghy, gx + 70, ghy, gx + 80, ghy - 6,
-             gx + 65, ghy - 10, gx + 5, ghy - 10, gx - 10, ghy - 5)
-        # Gondolier
-        rect(gx + 50, ghy - 28, gx + 56, ghy - 10)
-        poly(gx + 47, ghy - 28, gx + 59, ghy - 28,
-             gx + 55, ghy - 36, gx + 51, ghy - 36)
+        # Wake / shimmer lines sliding toward the camera
+        for i in range(7):
+            wz = self._NEAR + ((i * 1.7 + (zc * 1.3 % 1.7))) * 2.2
+            if wz >= self._FAR:
+                continue
+            wx, wy, s = self._proj(0, 0, wz)
+            half = s * (0.4 + (i % 3) * 0.25)
+            cnv.create_line(wx - half, wy, wx + half, wy,
+                            fill="#1a3a64", tags="scene")
 
-        # Text overlay (placed in water area so it doesn't cover buildings)
-        ty_txt = gy + 28
-        cnv.create_text(w // 2, ty_txt,
-                        text="EXPOSURE CHECKER",
-                        fill="#e6edf3",
-                        font=("TkDefaultFont", 20, "bold"),
-                        anchor="center")
-        cnv.create_text(w // 2, ty_txt + 26,
-                        text="Security scanner for systems you own",
-                        fill="#7d8590",
-                        font=("TkDefaultFont", 10),
-                        anchor="center")
-        cnv.create_text(w // 2, ty_txt + 48,
-                        text=f"v{ec.__version__}",
-                        fill="#4a5566",
-                        font=("TkDefaultFont", 8),
-                        anchor="center")
+    def _draw_gull_back(self, t):
+        """Third-person seagull seen from behind, leading the camera."""
+        cnv = self._cnv
+        cnv.delete("gull")
+        cx = self.W / 2 + math.sin(t * 0.9) * 26
+        cy = self._hz - 38 + math.sin(t * 1.7) * 10
+        flap = math.sin(t * 3.2 * 2 * math.pi)          # wing angle
+        span, sweep = 46, 16 + flap * 14
+        body_c, wing_c, tip_c = "#f2f5fa", "#dde4ee", "#2a3140"
+        # Wings (symmetric, seen from behind)
+        for side in (-1, 1):
+            cnv.create_polygon(
+                cx, cy,
+                cx + side * span * 0.45, cy - sweep * 0.7,
+                cx + side * span,        cy - sweep,
+                cx + side * span * 0.92, cy - sweep + 5,
+                cx + side * span * 0.4,  cy + 4,
+                fill=wing_c, outline="", smooth=True, tags="gull")
+            cnv.create_polygon(
+                cx + side * span * 0.78, cy - sweep + 1,
+                cx + side * span,        cy - sweep,
+                cx + side * span * 0.92, cy - sweep + 5,
+                fill=tip_c, outline="", tags="gull")
+        # Body + tail
+        cnv.create_oval(cx - 6, cy - 4, cx + 6, cy + 10,
+                        fill=body_c, outline="", tags="gull")
+        cnv.create_polygon(cx - 4, cy + 8, cx + 4, cy + 8, cx, cy + 16,
+                           fill=wing_c, outline="", tags="gull")
+        # Head peeking above the body
+        cnv.create_oval(cx - 3, cy - 9, cx + 3, cy - 3,
+                        fill=body_c, outline="", tags="gull")
+
+    def _draw_titles(self):
+        cnv = self._cnv
+        cnv.delete("title")
+        ty = self.H - 64
+        cnv.create_text(self.W // 2 + 1, ty + 1, text="EXPOSURE CHECKER",
+                        fill="#03060c", font=("TkDefaultFont", 21, "bold"),
+                        anchor="center", tags="title")
+        cnv.create_text(self.W // 2, ty, text="EXPOSURE CHECKER",
+                        fill="#e6edf3", font=("TkDefaultFont", 21, "bold"),
+                        anchor="center", tags="title")
+        cnv.create_text(self.W // 2, ty + 26,
+                        text="Scan · Protect · Clean — on the machine you own",
+                        fill="#9aa6b5", font=("TkDefaultFont", 10),
+                        anchor="center", tags="title")
+        cnv.create_text(self.W // 2, ty + 46, text=f"v{ec.__version__}",
+                        fill="#56627a", font=("TkDefaultFont", 8),
+                        anchor="center", tags="title")
+
+    # ── Animation loop ────────────────────────────────────────────────────────
 
     def _tick(self):
         if not self._alive:
@@ -2401,32 +2582,29 @@ class VeniceSplash:
         t  = self._t
         dt = self._TICK_MS / 1000.0
 
-        # Alpha fade
         if self._can_alpha:
             if t < self._FADE_IN:
                 self._win.attributes("-alpha", t / self._FADE_IN)
             elif t > self._DURATION - self._FADE_OUT:
                 remaining = self._DURATION - t
-                self._win.attributes(
-                    "-alpha", max(0.0, remaining / self._FADE_OUT)
-                )
+                self._win.attributes("-alpha", max(0.0, remaining / self._FADE_OUT))
 
         if t >= self._DURATION:
             self._alive = False
             self._win.destroy()
             return
 
-        # Seagull position
-        gull_progress = max(0.0, (t - 0.2) / (self._DURATION - 0.6))
-        gull_x = -55 + gull_progress * (self.W + 110)
-        gull_y = (int(self.H * 0.28)
-                  + int(math.sin(gull_progress * math.pi * 1.8) * 22)
-                  + int(math.sin(gull_progress * math.pi * 6) * 6))
-        flap   = math.sin(t * 3.5 * 2 * math.pi)  # 3.5 Hz
+        # Ease the camera in, cruise, ease out
+        ease = min(1.0, t / 0.7) * min(1.0, max(0.15, (self._DURATION - t) / 0.8))
+        self._z_cam += self._SPEED * ease * dt
 
-        self._cnv.delete("gull")
-        _draw_gull_icon(self._cnv, int(gull_x), gull_y, flap=flap,
-                        scale=1.0)
+        try:
+            self._draw_scene()
+            self._draw_gull_back(t)
+            self._draw_titles()
+        except tk.TclError:
+            self._alive = False
+            return
 
         self._t += dt
         self._win.after(self._TICK_MS, self._tick)
@@ -2448,8 +2626,28 @@ def _show_splash(root):
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def main():
+    # When the frozen app is re-invoked by a scheduled scan (or run from a
+    # terminal with CLI args), delegate to the scanner's command-line handler
+    # instead of opening the GUI. Without this, `exposure-checker headless`
+    # would silently launch the window and the scheduled scan would never run.
+    _CLI_SUBCOMMANDS = {"headless", "schedule", "diff", "remediate"}
+    argv = sys.argv[1:]
+    if argv and (argv[0] in _CLI_SUBCOMMANDS or argv[0].startswith("-")):
+        ec.main()
+        return
+
     root = tk.Tk()
     root.withdraw()
+    # On HiDPI Windows, sync Tk's logical scaling to the real DPI so fonts and
+    # canvas geometry match the crispness we enabled at process level.
+    if _UI_OS == "Windows":
+        try:
+            import ctypes
+            dpi = ctypes.windll.user32.GetDpiForSystem()
+            if dpi and dpi != 96:
+                root.tk.call("tk", "scaling", dpi / 72.0)
+        except Exception:
+            pass
     app_built = [False]
 
     def _show_main():

@@ -1,10 +1,27 @@
 # Exposure Checker
 
-A self-hosted security scanner for machines you own. Detects risky open ports,
-weak configurations, brute-force attempts, outdated packages, malware indicators,
-and more — then tells you exactly how to fix each finding.
+A self-hosted **security, antivirus, and cleanup** tool for machines you own.
+Three things in one app:
 
-Runs on **Linux, macOS, and Windows**. No cloud, no telemetry — everything stays on your machine.
+- **Protect** — finds risky open ports, weak configs, brute-force attempts,
+  outdated packages, and malware indicators, then drives your OS's *own* defenses
+  (Windows Defender / macOS XProtect + Gatekeeper / ClamAV; Windows Firewall / pf
+  / macOS application firewall) and tells you exactly how to fix each finding.
+- **Clean** — reclaims disk space CCleaner-style: browser and package-manager
+  caches, system temp/log bloat, old kernels, crash dumps, Xcode/iOS debris,
+  Recycle Bin, and a **startup-programs audit** (the biggest lever for "my
+  machine got slower / I want more FPS").
+- **Track** — risk score and letter grade, history trend, baselines, diffs,
+  scheduled scans, and HTML/PDF reports.
+
+Runs on **Linux, macOS, and Windows**. No cloud, no telemetry, no accounts —
+everything stays on your machine.
+
+> **Honest architecture:** this is an *orchestrator*, not a from-scratch AV.
+> A resident antivirus engine and packet-filtering firewall can't (and
+> shouldn't) be reimplemented in Python — they'd be slower and weaker than what
+> ships with your OS. Exposure Checker drives the native engines and layers
+> heuristics + plain-language remediation on top. 100% local.
 
 > **Only scan systems you own or have written permission to test.**
 
@@ -65,14 +82,24 @@ One pip dependency: `cryptography` (TLS checks only). Everything else is Python 
 | Cron / scheduled tasks | `--check-cron` | crontab | crontab | Task Scheduler |
 | User accounts | `--check-user-accounts` | Extra UID-0, empty passwords | Extra UID-0 | Get-LocalUser, no-password accounts |
 | Docker socket | `--check-docker` | POSIX mode bits | POSIX mode bits | Named pipe ACL |
-| Malware scan | `--check-malware` | ClamAV + temp executables + suspicious procs + ld.so.preload + script patterns | ClamAV | Windows Defender + registry Run keys + temp executables + suspicious procs |
+| Malware / antivirus | `--check-malware` | ClamAV + temp executables + suspicious procs + ld.so.preload + script patterns | Gatekeeper + XProtect freshness + launchd persistence + Mach-O temp binaries + ClamAV (if installed) | Defender (third-party-AV aware) + active-threat check + registry Run keys + temp executables + suspicious procs |
+| Startup programs | `--check-startup` | `~/.config/autostart` | LaunchAgents / LaunchDaemons + Login Items | Run keys (HKLM/HKCU) + Startup folders |
+| System cleaner | `--check-cleaner` | APT/DNF cache, orphans, old kernels, journal, crash dumps, temp, thumbnails, browser/dev caches | user caches, Trash, logs, Xcode DerivedData, iOS backups, brew cleanup, temp, browser/dev caches | temp, Windows Update cache, Delivery Optimization, Recycle Bin, crash dumps, browser/dev caches |
 | TLS certificate | `--tls-check HOST` | ✓ | ✓ | ✓ |
 | Container CVEs | `--trivy-scan` | Trivy (if installed) | Trivy (if installed) | Trivy (if installed) |
 
 Run everything at once:
 
 ```bash
-exposure-checker --full-audit
+exposure-checker --full-audit          # security + antivirus + startup audit
+```
+
+Cleanup is opt-in (it only ever *reports* reclaimable space; nothing is deleted
+without you running the fix):
+
+```bash
+exposure-checker --check-cleaner       # CCleaner-style disk reclaim report
+exposure-checker --check-startup       # what launches at boot/login
 ```
 
 ---
@@ -169,17 +196,25 @@ exposure-checker-ui
 
 Dark-theme desktop app with:
 
-- Animated risk score ring and letter grade
-- Real-time findings table with severity filtering
-- **System cleaner** — scans for reclaimable disk space (APT cache, old kernels, journal bloat, Windows temp/WU cache, crash dumps, Recycle Bin)
-- **Malware / antivirus tab** — ClamAV signatures + heuristic indicators (Linux/macOS) or Windows Defender + registry persistence + suspicious processes
-- One-click remediation with per-command confirmation
-- HTML and PDF report export
-- Scan history with score trend chart
+- A **Venice canal flythrough** splash (third-person camera trailing a seagull
+  down the canals at dusk) and the seagull mascot throughout
+- Animated radar/score ring with letter grade, plus a scan-history trend chart
+- Real-time findings cards with severity filtering and one-click remediation
+  (a **single** elevation prompt per batch — one UAC dialog on Windows, one
+  password dialog on macOS, not one per fix)
+- **Three scan tabs:**
+  - **Security** — ports, SSH, firewall, listeners, kernel, perms, accounts, …
+  - **Antivirus** — drives Defender (third-party-AV aware, so Norton/Bitdefender
+    users don't get false "Defender disabled" criticals) / XProtect + Gatekeeper
+    + launchd persistence / ClamAV, with heuristic indicators
+  - **Cleaner** — reclaimable disk space + the startup-programs audit
+- HTML and PDF report export (opens correctly on all platforms)
 - Accepted risks — suppress known-safe findings
 - Snapshot and restore — capture and revert system config state
 - Compliance profiles — CIS Level 1, HIPAA Basics, PCI-DSS Lite
-- Scheduled scans with desktop notifications
+- Scheduled scans with desktop notifications (frozen-app safe — the scheduler
+  re-launches the binary correctly, not a vanished temp path)
+- Crisp on HiDPI/scaled Windows displays; trackpad scrolling works on macOS
 
 ---
 

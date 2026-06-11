@@ -116,6 +116,8 @@ class TestParseSshdConfig:
         assert settings is None
         assert err is not None
 
+    @pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0,
+                        reason="root bypasses file permissions")
     def test_permission_error(self, tmp_path):
         cfg = tmp_path / "sshd_config"
         cfg.write_text("X yes\n")
@@ -1414,6 +1416,8 @@ class TestCheckAuthLog:
         assert not r.findings
         assert any("No auth log" in m for m in r.infos)
 
+    @pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0,
+                        reason="root bypasses file permissions")
     def test_permission_error_reports_error(self, tmp_path):
         log = tmp_path / "auth.log"
         log.write_text("x")

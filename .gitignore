@@ -5,6 +5,11 @@ venv/
 .venv/
 env/
 
+# PyInstaller build output
+build/
+dist/
+*.spec.bak
+
 # Local config & secrets - NEVER commit these
 config.ini
 config.json

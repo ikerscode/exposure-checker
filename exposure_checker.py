@@ -58,16 +58,41 @@ except ImportError:
 
 _OS = platform.system()  # "Linux" | "Darwin" | "Windows"
 
+# On Windows, every subprocess launched from a windowed (no-console) app
+# flashes a console window unless CREATE_NO_WINDOW is set.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if platform.system() == "Windows" else 0
+
+
 def _ps(cmd: str, timeout: int = 30) -> tuple:
-    """Run a PowerShell command. Returns (stdout_str, returncode)."""
+    """Run a PowerShell command. Returns (stdout_str, returncode).
+
+    - CREATE_NO_WINDOW: prevents a console flash in the windowed app.
+    - errors="replace": PowerShell on non-English Windows emits OEM-codepage
+      bytes that crash text=True decoding with UnicodeDecodeError.
+    """
     try:
         r = subprocess.run(
             ["powershell", "-NonInteractive", "-NoProfile", "-Command", cmd],
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True, text=True, errors="replace",
+            timeout=timeout, creationflags=_NO_WINDOW,
         )
         return r.stdout, r.returncode
     except (OSError, subprocess.TimeoutExpired):
         return "", 1
+
+
+def _self_invocation() -> list:
+    """Return the argv prefix that re-launches *this* program for cron /
+    launchd / Task Scheduler entries.
+
+    Critical for the frozen (PyInstaller) app: ``__file__`` lives inside the
+    one-file bundle's temp ``_MEIPASS`` directory, which is deleted when the
+    app exits — baking it into a schedule produces entries that silently
+    break. Frozen builds must be re-launched via ``sys.executable`` alone.
+    """
+    if getattr(sys, "frozen", False):
+        return [sys.executable]
+    return [sys.executable, os.path.abspath(__file__)]
 
 
 # ── Risk database ──────────────────────────────────────────────────────────────
@@ -769,20 +794,38 @@ def scan_trivy(reporter, image_spec=None):
 
 def _check_firewall_macos(reporter):
     reporter.begin("FIREWALL STATUS")
-    # Application firewall (socketfilterfw)
+    # 1. Preference file — readable without root, unlike pfctl.
+    #    globalstate: 0 = off, 1 = on, 2 = on (block all incoming)
+    try:
+        r = subprocess.run(
+            ["defaults", "read", "/Library/Preferences/com.apple.alf", "globalstate"],
+            capture_output=True, text=True, timeout=10,
+        )
+        state = r.stdout.strip()
+        if r.returncode == 0 and state in ("1", "2"):
+            reporter.ok("Application firewall is enabled"
+                        + (" (block all incoming)" if state == "2" else ""))
+            reporter.end()
+            return
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    # 2. socketfilterfw (may require privileges on newer macOS)
     sff = shutil.which("socketfilterfw") or "/usr/libexec/ApplicationFirewall/socketfilterfw"
     try:
         r = subprocess.run([sff, "--getglobalstate"], capture_output=True, text=True, timeout=10)
         if "enabled" in r.stdout.lower():
             reporter.ok("Application firewall is enabled")
+            reporter.end()
             return
     except (OSError, subprocess.TimeoutExpired):
         pass
-    # pf (packet filter)
+    # 3. pf (packet filter) — pfctl exits non-zero / prints nothing for
+    #    non-root users, so only trust a positive answer.
     try:
         r = subprocess.run(["pfctl", "-s", "info"], capture_output=True, text=True, timeout=10)
         if "enabled" in r.stdout.lower():
             reporter.ok("pf firewall is enabled")
+            reporter.end()
             return
     except (OSError, subprocess.TimeoutExpired):
         pass
@@ -800,6 +843,7 @@ def _check_firewall_windows(reporter):
     out, rc = _ps("Get-NetFirewallProfile | Select-Object Name,Enabled | ConvertTo-Json")
     if rc != 0 or not out.strip():
         reporter.error("Could not query Windows Firewall (requires PowerShell)")
+        reporter.end()
         return
     try:
         profiles = json.loads(out)
@@ -812,7 +856,7 @@ def _check_firewall_windows(reporter):
                 "HIGH", "Windows Firewall disabled on all profiles",
                 "All firewall profiles (Domain, Private, Public) are off.",
                 "Enable via: Windows Security → Firewall & network protection",
-                fix_cmds=["Set-NetFirewallProfile -All -Enabled True"],
+                fix_cmds=["Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True"],
             )
             reporter.end("1 firewall issue.")
         elif any_off:
@@ -826,6 +870,7 @@ def _check_firewall_windows(reporter):
             reporter.end("1 firewall issue.")
         else:
             reporter.ok("Windows Firewall is enabled on all profiles")
+            reporter.end()
     except (json.JSONDecodeError, KeyError):
         reporter.error("Could not parse firewall profile output")
 
@@ -959,11 +1004,15 @@ def _check_listeners_macos(reporter):
         pending.append((severity, label, why, fix, {"port": port, "address": addr}))
     if not pending:
         reporter.ok("No high-risk externally-bound services found")
+        reporter.end()
         return
     pending.sort(key=lambda f: SEVERITY_ORDER.get(f[0], 9))
     for severity, label, why, fix, extra in pending:
         reporter.finding(severity, label, why, fix, **extra)
     reporter.end(f"{len(pending)} externally-reachable service(s). Review above.")
+
+
+_WIN_LOOPBACK = {"127.0.0.1", "::1", "0:0:0:0:0:0:0:1"}
 
 
 def _check_listeners_windows(reporter):
@@ -974,6 +1023,7 @@ def _check_listeners_windows(reporter):
     )
     if rc != 0 or not out.strip():
         reporter.error("Could not query TCP listeners (requires PowerShell)")
+        reporter.end()
         return
     # Also get process names
     pnames, _ = _ps(
@@ -993,14 +1043,21 @@ def _check_listeners_windows(reporter):
             conns = [conns]
     except Exception:
         reporter.error("Could not parse TCP listener output")
+        reporter.end()
         return
     pending = []
+    seen = set()  # (port, pid) — dual-stack services bind 0.0.0.0 AND ::,
+                  # which previously produced every finding twice.
     for c in conns:
         addr = c.get("LocalAddress", "")
         port = c.get("LocalPort", 0)
         pid  = str(c.get("OwningProcess", ""))
-        if addr in ("127.0.0.1", "::1", "0:0:0:0:0:0:0:1"):
+        if addr in _WIN_LOOPBACK:
             continue
+        key = (port, pid)
+        if key in seen:
+            continue
+        seen.add(key)
         proc_name = pid_map.get(pid, f"PID {pid}")
         info = RISKY_PORTS.get(port) or SPECIAL.get(port)
         if info:
@@ -1013,6 +1070,7 @@ def _check_listeners_windows(reporter):
         pending.append((severity, label, why, fix, {"port": port, "address": addr}))
     if not pending:
         reporter.ok("No high-risk externally-bound services found")
+        reporter.end()
         return
     pending.sort(key=lambda f: SEVERITY_ORDER.get(f[0], 9))
     for severity, label, why, fix, extra in pending:
@@ -1130,7 +1188,7 @@ def _check_world_writable_windows(reporter):
         if not os.path.isdir(check_dir):
             continue
         out, rc = _ps(
-            f"icacls '{check_dir}\\*' 2>$null | "
+            f'icacls "{check_dir}\\*" 2>$null | '
             "Select-String 'Everyone.*(M|F|W)' | Select-Object -First 10 -ExpandProperty Line",
             timeout=45,
         )
@@ -1140,6 +1198,7 @@ def _check_world_writable_windows(reporter):
                 findings.append(line)
     if not findings:
         reporter.ok("No Everyone-writable files found in system directories")
+        reporter.end()
         return
     reporter.finding(
         "HIGH", f"{len(findings)} Everyone-writable file(s) in system directories",
@@ -1290,6 +1349,7 @@ def _check_scheduled_tasks_windows(reporter):
     )
     if rc != 0 or not out.strip():
         reporter.ok("No scheduled tasks found or access denied")
+        reporter.end()
         return
     try:
         tasks = json.loads(out)
@@ -1297,20 +1357,25 @@ def _check_scheduled_tasks_windows(reporter):
             tasks = [tasks]
     except Exception:
         reporter.error("Could not parse scheduled tasks output")
+        reporter.end()
         return
+    # Built-in tasks under \Microsoft\ legitimately run as SYSTEM — flagging
+    # them buried real findings under dozens of noise rows.
     suspicious = [t for t in tasks if
-                  (t.get("RunAs") or "").upper() in ("SYSTEM", "NT AUTHORITY\\SYSTEM")]
+                  (t.get("RunAs") or "").upper() in ("SYSTEM", "NT AUTHORITY\\SYSTEM")
+                  and not (t.get("TaskPath") or "").startswith("\\Microsoft\\")]
     if not suspicious:
-        reporter.ok(f"{len(tasks)} active scheduled task(s) — none running as SYSTEM found suspicious")
+        reporter.ok(f"{len(tasks)} active scheduled task(s) — no non-Microsoft SYSTEM tasks found")
+        reporter.end()
         return
     for t in suspicious[:10]:
         reporter.finding(
             "REVIEW",
-            f"Scheduled task runs as SYSTEM: {t.get('TaskName', '?')}",
-            "Tasks running as SYSTEM have full machine access.",
+            f"Third-party task runs as SYSTEM: {t.get('TaskName', '?')}",
+            f"Non-Microsoft task at {t.get('TaskPath','?')} runs with full machine access.",
             "Review in Task Scheduler — disable if not needed.",
         )
-    reporter.end(f"{len(suspicious)} SYSTEM task(s) found.")
+    reporter.end(f"{len(suspicious)} non-Microsoft SYSTEM task(s) found.")
 
 
 _CRON_FILES       = ["/etc/crontab"]
@@ -1399,18 +1464,28 @@ def _check_kernel_macos(reporter):
     reporter.begin("KERNEL HARDENING (macOS)")
     issues = []
     checks = [
-        ("net.inet.ip.forwarding",  "1", "MEDIUM", "IP forwarding enabled — machine routes packets"),
-        ("kern.bootargs",           None, "REVIEW", "Boot args"),
+        ("net.inet.ip.forwarding", "1", "MEDIUM", "IP forwarding enabled — machine routes packets"),
     ]
     for key, bad_val, sev, desc in checks:
         try:
             r = subprocess.run(["sysctl", "-n", key], capture_output=True, text=True, timeout=5)
             val = r.stdout.strip()
-            if bad_val and val == bad_val:
+            if val == bad_val:
                 issues.append((sev, f"{key} = {val}", desc,
                                f"Set: sudo sysctl -w {key}=0"))
         except (OSError, subprocess.TimeoutExpired):
             pass
+    # Check kernel boot args for security-disabling flags
+    try:
+        r = subprocess.run(["sysctl", "-n", "kern.bootargs"], capture_output=True, text=True, timeout=5)
+        val = r.stdout.strip()
+        dangerous = [f for f in ("kext-dev-mode=1", "amfi_get_out_of_my_way=1", "cs_enforcement_disable=1") if f in val]
+        if dangerous:
+            issues.append(("HIGH", f"Dangerous boot args: {', '.join(dangerous)}",
+                           "These boot arguments disable key macOS security features (SIP, AMFI, codesigning).",
+                           "Remove from boot args in Recovery Mode → csrutil authenticated-root disable reversal"))
+    except (OSError, subprocess.TimeoutExpired):
+        pass
     # SIP check
     try:
         r = subprocess.run(["csrutil", "status"], capture_output=True, text=True, timeout=5)
@@ -1549,6 +1624,7 @@ def _check_kernel_windows(reporter):
 
     if not issues:
         reporter.ok("No Windows kernel/security hardening issues found")
+        reporter.end()
         return
     for sev, label, why, fix in issues:
         reporter.finding(sev, label, why, fix)
@@ -1815,16 +1891,19 @@ _SENSITIVE_FILE_RULES = [
 ]
 
 
+_SENSITIVE_FILE_RULES_MACOS_EXTRA = [
+    ("/private/etc/shadow", 0o004, "CRITICAL",
+     "/private/etc/shadow world-readable",
+     "Password hashes are readable by any local user.",
+     "chmod 640 /private/etc/shadow",
+     ["chmod 640 /private/etc/shadow"]),
+]
+
+
 def check_sensitive_perms(reporter, rules=None, ssh_key_glob="/etc/ssh/ssh_host_*_key"):
     if _OS == "Darwin":
-        ssh_key_glob = "/etc/ssh/ssh_host_*_key"  # same on macOS
-        # macOS-specific additional paths
-        _macos_extra_rules = [
-            ("/etc/sudoers", 0o440, "root", None),
-            ("/private/etc/shadow", 0o0, "root", None),
-        ]
         if rules is None:
-            rules = _macos_extra_rules
+            rules = list(_SENSITIVE_FILE_RULES) + _SENSITIVE_FILE_RULES_MACOS_EXTRA
     elif _OS == "Windows":
         _check_sensitive_perms_windows(reporter)
         return
@@ -1881,9 +1960,13 @@ def check_sensitive_perms(reporter, rules=None, ssh_key_glob="/etc/ssh/ssh_host_
 
 def _check_user_accounts_windows(reporter):
     reporter.begin("USER ACCOUNTS")
-    out, rc = _ps("Get-LocalUser | Select-Object Name,Enabled,PasswordRequired | ConvertTo-Json")
+    out, rc = _ps(
+        "Get-LocalUser | Select-Object Name,Enabled,PasswordRequired,PasswordLastSet "
+        "| ConvertTo-Json"
+    )
     if rc != 0 or not out.strip():
         reporter.error("Could not query local users (requires admin)")
+        reporter.end()
         return
     try:
         users = json.loads(out)
@@ -1891,17 +1974,22 @@ def _check_user_accounts_windows(reporter):
             users = [users]
     except Exception:
         reporter.error("Could not parse user list")
+        reporter.end()
         return
     issues = []
     for u in users:
         if not u.get("Enabled"):
             continue
-        if not u.get("PasswordRequired", True):
-            issues.append(("CRITICAL", f"User '{u['Name']}' has no password required",
-                           "Accounts without password requirements allow unauthenticated access.",
-                           f"Set password: net user {u['Name']} *"))
+        # PasswordRequired=False alone can be set on Windows Hello/PIN accounts that
+        # are perfectly secure. Only flag when PasswordLastSet is also null, meaning
+        # no password has ever been set on the account.
+        if not u.get("PasswordRequired", True) and u.get("PasswordLastSet") is None:
+            issues.append(("CRITICAL", f"User '{u['Name']}' has no password set",
+                           "Account has no password — anyone can log in without authenticating.",
+                           f"net user \"{u['Name']}\" *"))
     if not issues:
-        reporter.ok(f"{len(users)} local user(s) — all enabled accounts require passwords")
+        reporter.ok(f"{len(users)} local user(s) checked — no passwordless accounts found")
+        reporter.end()
         return
     for sev, label, why, fix in issues:
         reporter.finding(sev, label, why, fix)
@@ -2077,28 +2165,36 @@ def check_docker_socket(reporter, sock_path="/var/run/docker.sock"):
 
 def _check_auth_log_macos(reporter):
     reporter.begin("AUTH LOG ANALYSIS (macOS)")
+    # `log show --last 24h` routinely takes minutes on real machines and blew
+    # the old 30 s timeout, surfacing as a scan error. A 6 h window with a
+    # 60 s budget completes reliably; if it still can't, skip gracefully.
     try:
         r = subprocess.run(
             ["log", "show", "--predicate",
              'process == "sshd" OR process == "sudo"',
-             "--last", "24h", "--style", "compact"],
-            capture_output=True, text=True, timeout=30,
+             "--last", "6h", "--style", "compact"],
+            capture_output=True, text=True, errors="replace", timeout=60,
         )
         lines = r.stdout.splitlines()
-    except (OSError, subprocess.TimeoutExpired) as e:
+    except subprocess.TimeoutExpired:
+        reporter.ok("Auth log query timed out (unified log is slow on this Mac) — skipped")
+        reporter.end()
+        return
+    except OSError as e:
         reporter.error(f"log show failed: {e}")
+        reporter.end()
         return
     failed = [l for l in lines if "failed" in l.lower() or "invalid user" in l.lower()]
     sudo_fail = [l for l in lines if "incorrect password" in l.lower()]
     if len(failed) > 20:
         reporter.finding(
-            "HIGH", f"{len(failed)} SSH authentication failures in last 24h",
+            "HIGH", f"{len(failed)} SSH authentication failures in last 6h",
             "High failure rate indicates brute-force or credential-stuffing attacks.",
             "Consider: fail2ban, SSH key-only auth, or port change.",
         )
     elif failed:
         reporter.finding(
-            "REVIEW", f"{len(failed)} SSH authentication failure(s) in last 24h",
+            "REVIEW", f"{len(failed)} SSH authentication failure(s) in last 6h",
             "Some failed SSH logins detected.",
             "Monitor for increases — consider key-only authentication.",
         )
@@ -2109,23 +2205,28 @@ def _check_auth_log_macos(reporter):
             "Review which users are attempting sudo.",
         )
     if not failed and not sudo_fail:
-        reporter.ok("No SSH brute-force or sudo failures in last 24h")
+        reporter.ok("No SSH brute-force or sudo failures in last 6h")
     reporter.end()
 
 
 def _check_auth_log_windows(reporter):
     reporter.begin("AUTH LOG ANALYSIS (Windows)")
-    # Event IDs: 4625 = failed logon, 4648 = explicit credential use
+    # Event IDs: 4625 = failed logon. Security log requires admin to read.
     out, rc = _ps(
         "Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4625; StartTime=(Get-Date).AddHours(-24)} "
-        "-ErrorAction SilentlyContinue | Measure-Object | Select-Object Count | ConvertTo-Json"
+        "-ErrorAction Stop 2>$null | Measure-Object | Select-Object Count | ConvertTo-Json"
     )
+    if rc != 0 or not out.strip():
+        reporter.error(
+            "Could not read Security event log — re-run as Administrator for auth log analysis"
+        )
+        reporter.end()
+        return
     count = 0
-    if rc == 0 and out.strip():
-        try:
-            count = json.loads(out).get("Count", 0)
-        except Exception:
-            pass
+    try:
+        count = json.loads(out).get("Count", 0) or 0
+    except Exception:
+        pass
     if count > 50:
         reporter.finding(
             "HIGH", f"{count} failed Windows logon events in last 24h",
@@ -2387,41 +2488,98 @@ def _check_windows_suspicious_procs(reporter):
     return found
 
 
+def _win_third_party_av() -> list:
+    """Return names of enabled third-party AV products from SecurityCenter2.
+
+    productState bit 0x1000 in the second byte == 'on'. When Norton /
+    Bitdefender / etc. is active, Windows *disables Defender by design* —
+    flagging that as CRITICAL was the app's worst false positive.
+    """
+    out, rc = _ps(
+        "Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct "
+        "-ErrorAction SilentlyContinue | Select-Object displayName,productState | ConvertTo-Json"
+    )
+    if rc != 0 or not out.strip():
+        return []
+    try:
+        prods = json.loads(out)
+    except Exception:
+        return []
+    if prods is None:                 # PowerShell emits literal "null"
+        return []
+    if isinstance(prods, dict):
+        prods = [prods]
+    active = []
+    for p in prods:
+        name  = p.get("displayName") or ""
+        state = p.get("productState") or 0
+        try:
+            enabled = bool(int(state) & 0x1000)   # 0x1000 nibble == 'on'
+        except (TypeError, ValueError):
+            enabled = False
+        low = name.lower()
+        # NB: "Bitdefender" contains the substring "defender" — match the
+        # *Microsoft* product specifically so third-party AVs aren't excluded.
+        is_ms_defender = "windows defender" in low or "microsoft defender" in low
+        if enabled and not is_ms_defender:
+            active.append(name)
+    return active
+
+
 def _check_malware_windows(reporter):
     reporter.begin("MALWARE SCAN (Windows Defender + heuristic indicators)")
+    third_party = _win_third_party_av()
     # Check Defender status
     out, rc = _ps("Get-MpComputerStatus | Select-Object AntivirusEnabled,RealTimeProtectionEnabled,AntivirusSignatureAge | ConvertTo-Json")
-    if rc != 0 or not out.strip():
-        reporter.error("Could not query Windows Defender status")
-        return
-    try:
-        status = json.loads(out)
-    except Exception:
-        reporter.error("Could not parse Defender status")
-        return
-    if not status.get("AntivirusEnabled"):
-        reporter.finding("CRITICAL", "Windows Defender antivirus is disabled",
-                         "No active antivirus means malware runs unchecked.",
-                         "Enable Defender: Windows Security → Virus & threat protection")
-    if not status.get("RealTimeProtectionEnabled"):
+    status = {}
+    if rc == 0 and out.strip():
+        try:
+            status = json.loads(out)
+        except Exception:
+            status = {}
+    if not status:
+        if third_party:
+            reporter.ok(f"Third-party antivirus active: {', '.join(third_party)}")
+        else:
+            reporter.error("Could not query Windows Defender status")
+            reporter.end()
+            return
+    if status and not status.get("AntivirusEnabled"):
+        if third_party:
+            reporter.ok(
+                f"Windows Defender is standing down because {', '.join(third_party)} "
+                "is the active antivirus — this is normal."
+            )
+        else:
+            reporter.finding("CRITICAL", "No active antivirus protection",
+                             "Windows Defender is disabled and no third-party antivirus is registered. "
+                             "Malware runs unchecked.",
+                             "Enable Defender: Windows Security → Virus & threat protection")
+    if status and status.get("AntivirusEnabled") and not status.get("RealTimeProtectionEnabled") and not third_party:
         reporter.finding("HIGH", "Windows Defender real-time protection is off",
                          "Without real-time protection, threats aren't caught on access.",
-                         "Enable: Set-MpPreference -DisableRealtimeMonitoring $false")
-    sig_age = status.get("AntivirusSignatureAge", 0)
-    if sig_age > 7:
+                         "Enable: Set-MpPreference -DisableRealtimeMonitoring $false",
+                         fix_cmds=["powershell -Command Set-MpPreference -DisableRealtimeMonitoring $false"])
+    sig_age = status.get("AntivirusSignatureAge", 0) or 0
+    if status.get("AntivirusEnabled") and sig_age > 7:
         reporter.finding("MEDIUM", f"Defender signatures are {sig_age} day(s) old",
                          "Outdated signatures miss recent malware.",
-                         "Update: Update-MpSignature")
-    # Check for active threats
-    out2, rc2 = _ps("Get-MpThreatDetection | Select-Object ThreatID,ThreatName,ProcessName | ConvertTo-Json")
-    if rc2 == 0 and out2.strip() and out2.strip() != "null":
+                         "Update: Update-MpSignature",
+                         fix_cmds=["powershell -Command Update-MpSignature"])
+    # Active threats only. Get-MpThreatDetection returns *historical* detections
+    # too — already-quarantined items were being reported as 'Active threat'.
+    out2, rc2 = _ps(
+        "Get-MpThreat -ErrorAction SilentlyContinue | Where-Object { $_.IsActive } | "
+        "Select-Object ThreatName,SeverityID | ConvertTo-Json"
+    )
+    if rc2 == 0 and out2.strip() and out2.strip().lower() != "null":
         try:
             threats = json.loads(out2)
             if isinstance(threats, dict):
                 threats = [threats]
             for t in threats[:10]:
                 reporter.finding("CRITICAL", f"Active threat detected: {t.get('ThreatName','?')}",
-                                 f"Windows Defender found malware: {t.get('ThreatName','?')} in {t.get('ProcessName','?')}.",
+                                 f"Windows Defender reports {t.get('ThreatName','?')} as currently active (not yet remediated).",
                                  "Open Windows Security → Virus & threat protection → Current threats")
         except Exception:
             pass
@@ -2465,6 +2623,10 @@ _AV_PATTERN_RE = [
 
 _AV_CLAMAV_DB_DIRS = ["/var/lib/clamav"]
 _AV_MAX_FILE_BYTES = 524_288  # 512 KB — skip larger files in pattern scan
+_AV_SCRIPT_EXTS   = frozenset({
+    ".sh", ".bash", ".zsh", ".ksh", ".csh",
+    ".py", ".pl", ".rb", ".php", ".lua",
+})
 
 
 def _av_clamav_db_age_days():
@@ -2489,9 +2651,12 @@ def _av_run_clamav(reporter, paths):
     """Run clamscan; report findings. Returns count of infected files."""
     clamscan = shutil.which("clamscan")
     if not clamscan:
+        if _OS == "Darwin":
+            install_hint = "brew install clamav && sudo freshclam"
+        else:
+            install_hint = "sudo apt-get install clamav && sudo freshclam"
         reporter.info(
-            "ClamAV not installed — signature scan skipped. "
-            "Install: sudo apt-get install clamav && sudo freshclam"
+            f"ClamAV not installed — signature scan skipped. Install: {install_hint}"
         )
         return 0
 
@@ -2544,13 +2709,19 @@ def _av_run_clamav(reporter, paths):
 
 
 _ELF_MAGIC = b"\x7fELF"
+# Mach-O magics (32/64-bit, both endiannesses, plus universal/fat binaries)
+_MACHO_MAGICS = frozenset({
+    b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
+    b"\xca\xfe\xba\xbe",
+})
 _SHEBANG   = b"#!"
 
 
-def _av_check_temp_executables(reporter):
-    """Flag ELF binaries and scripts in /tmp, /var/tmp, /dev/shm."""
+def _av_check_temp_executables(reporter, temp_dirs=None):
+    """Flag executable binaries and scripts in temp directories."""
     found = []  # list of (path, kind)
-    for d in _AV_TEMP_DIRS:
+    for d in (temp_dirs or _AV_TEMP_DIRS):
         if not os.path.isdir(d):
             continue
         try:
@@ -2566,6 +2737,8 @@ def _av_check_temp_executables(reporter):
                             magic = fh.read(4)
                         if magic[:4] == _ELF_MAGIC:
                             found.append((fpath, "ELF binary"))
+                        elif magic[:4] in _MACHO_MAGICS:
+                            found.append((fpath, "Mach-O binary"))
                         elif magic[:2] == _SHEBANG:
                             found.append((fpath, "script"))
                     except OSError:
@@ -2588,6 +2761,8 @@ def _av_check_temp_executables(reporter):
 
 def _av_check_suspicious_procs(reporter):
     """Flag processes running from deleted or temp-dir executables."""
+    if _OS != "Linux":
+        return 0
     found = []
     try:
         for entry in os.scandir("/proc"):
@@ -2663,13 +2838,17 @@ def _av_check_ld_preload(reporter):
     return 1
 
 
-def _av_scan_scripts(reporter):
+_AV_TEMP_DIR_SET = frozenset(_AV_TEMP_DIRS)
+
+
+def _av_scan_scripts(reporter, script_dirs=None):
     """Scan scripts in high-risk dirs for known-bad patterns."""
     hits = []
     seen = set()
-    for base in _AV_SCRIPT_DIRS:
+    for base in (script_dirs or _AV_SCRIPT_DIRS):
         if not os.path.exists(base):
             continue
+        in_temp = base in _AV_TEMP_DIR_SET
         if os.path.isfile(base):
             walk_iter = [("", [], [base])]
         else:
@@ -2681,8 +2860,19 @@ def _av_scan_scripts(reporter):
                     continue
                 seen.add(fpath)
                 try:
-                    if os.stat(fpath).st_size > _AV_MAX_FILE_BYTES:
+                    st = os.stat(fpath)
+                    if st.st_size > _AV_MAX_FILE_BYTES:
                         continue
+                    # In temp dirs only scan files that look like actual scripts
+                    # (shebang or known extension) to avoid false positives on
+                    # arbitrary data files dropped by build systems or CI runners.
+                    if in_temp:
+                        ext = os.path.splitext(fname)[1].lower()
+                        if ext not in _AV_SCRIPT_EXTS:
+                            with open(fpath, "rb") as fh:
+                                if fh.read(2) != b"#!":
+                                    continue
+                            # re-open for full read below
                     with open(fpath, "rb") as fh:
                         content = fh.read()
                     for pattern_re, name in _AV_PATTERN_RE:
@@ -2707,11 +2897,135 @@ def _av_scan_scripts(reporter):
     return len(hits)
 
 
+# ── macOS malware checks ────────────────────────────────────────────────────────
+
+_MAC_AV_TEMP_DIRS   = ["/tmp", "/var/tmp", "/private/tmp"]
+_MAC_AV_SCAN_DIRS   = [os.path.expanduser("~"), "/private/tmp", "/Users/Shared"]
+_MAC_LAUNCHD_DIRS   = [
+    os.path.expanduser("~/Library/LaunchAgents"),
+    "/Library/LaunchAgents",
+    "/Library/LaunchDaemons",
+]
+# Apple's own agents live in /System/Library — anything there is SIP-protected.
+_MAC_PLIST_SUSPECT_RE = re.compile(
+    rb"(?:/tmp/|/var/tmp/|/private/tmp/|/Users/Shared/\.|curl\s|nc\s+-|bash\s+-i|osascript\s+-e|"
+    rb"base64\s+(?:-d|--decode)|python[23]?\s+-c)",
+    re.IGNORECASE,
+)
+
+
+def _check_gatekeeper_macos(reporter) -> int:
+    """Gatekeeper blocks unsigned/unnotarized apps. Off = anything runs."""
+    try:
+        r = subprocess.run(["spctl", "--status"], capture_output=True,
+                           text=True, errors="replace", timeout=10)
+        if "disabled" in (r.stdout + r.stderr).lower():
+            reporter.finding(
+                "HIGH", "Gatekeeper is disabled",
+                "With Gatekeeper off, unsigned and unnotarized apps launch without any check — "
+                "the single most common way Mac malware gets installed.",
+                "Re-enable: sudo spctl --master-enable",
+                fix_cmds=["sudo spctl --master-enable"],
+            )
+            return 1
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return 0
+
+
+def _check_xprotect_macos(reporter) -> int:
+    """XProtect is macOS's built-in signature AV. Verify it's present/recent."""
+    candidates = [
+        "/Library/Apple/System/Library/CoreServices/XProtect.bundle/Contents/Info.plist",
+        "/System/Library/CoreServices/XProtect.bundle/Contents/Info.plist",
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            try:
+                age_days = (time.time() - os.path.getmtime(p)) / 86400
+            except OSError:
+                return 0
+            if age_days > 90:
+                reporter.finding(
+                    "MEDIUM", f"XProtect signatures are {int(age_days)} days old",
+                    "macOS's built-in malware signatures haven't updated in months — "
+                    "background security updates may be disabled.",
+                    "System Settings → General → Software Update → enable "
+                    "'Install Security Responses and system files'.",
+                )
+                return 1
+            return 0
+    reporter.finding(
+        "MEDIUM", "XProtect bundle not found",
+        "Could not locate macOS's built-in malware scanner — unusual on a healthy system.",
+        "Run Software Update; if it persists, consider reinstalling macOS.",
+    )
+    return 1
+
+
+def _check_launchd_persistence_macos(reporter) -> int:
+    """Scan LaunchAgents/Daemons plists for malware-style persistence."""
+    n = 0
+    for d in _MAC_LAUNCHD_DIRS:
+        if not os.path.isdir(d):
+            continue
+        try:
+            entries = sorted(os.listdir(d))
+        except OSError:
+            continue
+        for name in entries:
+            if not name.endswith(".plist"):
+                continue
+            path = os.path.join(d, name)
+            try:
+                if os.path.getsize(path) > 262_144:
+                    continue
+                with open(path, "rb") as fh:
+                    blob = fh.read()
+            except OSError:
+                continue
+            m = _MAC_PLIST_SUSPECT_RE.search(blob)
+            if m:
+                snippet = m.group(0).decode("utf-8", "replace")
+                reporter.finding(
+                    "HIGH", f"Suspicious launchd persistence: {name}",
+                    f"{path} auto-runs at login/boot and references '{snippet}' — "
+                    "temp-directory binaries and inline shells are classic Mac malware persistence.",
+                    f"Inspect it: plutil -p '{path}' — if unrecognized, remove and run: "
+                    f"launchctl bootout gui/$(id -u) '{path}'",
+                )
+                n += 1
+    return n
+
+
+def _check_malware_macos(reporter, clamav_paths=None):
+    reporter.begin("MALWARE SCAN (macOS)",
+                   "Gatekeeper + XProtect + launchd persistence + heuristics")
+    n  = _check_gatekeeper_macos(reporter)
+    n += _check_xprotect_macos(reporter)
+    n += _check_launchd_persistence_macos(reporter)
+    # ClamAV if installed (brew install clamav) — scan macOS paths, not /home
+    n += _av_run_clamav(reporter, clamav_paths or _MAC_AV_SCAN_DIRS)
+    n += _av_check_temp_executables(reporter, temp_dirs=_MAC_AV_TEMP_DIRS)
+    n += _av_check_suspicious_procs(reporter)
+    n += _av_scan_scripts(reporter, script_dirs=[
+        os.path.expanduser("~/Library/LaunchAgents"),
+        "/private/tmp", "/var/tmp", "/Users/Shared",
+    ])
+    if n == 0:
+        reporter.ok("No malware indicators found — Gatekeeper and XProtect look healthy.")
+    reporter.end(
+        f"{n} malware indicator(s) — investigate immediately." if n else None
+    )
+
+
 def check_malware(reporter, clamav_paths=None):
     if _OS == "Windows":
         _check_malware_windows(reporter)
         return
-    # macOS: fall through to ClamAV check (works on macOS too)
+    if _OS == "Darwin":
+        _check_malware_macos(reporter, clamav_paths)
+        return
 
     reporter.begin("MALWARE SCAN", "ClamAV signatures + heuristic indicators")
 
@@ -2770,17 +3084,37 @@ def _check_packages_macos(reporter):
 def _check_packages_windows(reporter):
     reporter.begin("PACKAGE UPDATES (Windows)")
     # Windows Update pending (best-effort; PSWindowsUpdate module may not be installed)
-    _ps("Get-WindowsUpdate -ErrorAction SilentlyContinue 2>$null | Measure-Object | Select-Object Count | ConvertTo-Json")
-    # Winget upgrades
+    wu_out, wu_rc = _ps(
+        "Get-WindowsUpdate -ErrorAction SilentlyContinue 2>$null "
+        "| Measure-Object | Select-Object Count | ConvertTo-Json"
+    )
+    if wu_rc == 0 and wu_out.strip():
+        try:
+            wu_count = json.loads(wu_out).get("Count", 0) or 0
+            if wu_count > 0:
+                reporter.finding(
+                    "HIGH", f"{wu_count} Windows Update(s) pending",
+                    "Pending Windows Updates may include critical security patches.",
+                    "Open Windows Update: Start → Settings → Windows Update → Check for updates",
+                )
+        except Exception:
+            pass
+    # Winget upgrades. NOTE: `winget upgrade --list` is an INVALID flag on
+    # modern winget (>= 1.4) — the command errored and the check silently
+    # reported "no upgrades" on every machine.
     winget = shutil.which("winget")
     if winget:
         try:
-            r = subprocess.run([winget, "upgrade", "--list", "--disable-interactivity"],
-                               capture_output=True, text=True, timeout=60)
-            lines = [l for l in r.stdout.splitlines() if l.strip() and "Name" not in l and "---" not in l]
-            if len(lines) > 1:
+            r = subprocess.run(
+                [winget, "upgrade", "--include-unknown",
+                 "--accept-source-agreements", "--disable-interactivity"],
+                capture_output=True, text=True, errors="replace",
+                timeout=90, creationflags=_NO_WINDOW,
+            )
+            n = _parse_winget_upgrade_count(r.stdout)
+            if n > 0:
                 reporter.finding(
-                    "MEDIUM", f"{len(lines)-1} winget package upgrade(s) available",
+                    "MEDIUM", f"{n} winget package upgrade(s) available",
                     "Outdated packages may contain known vulnerabilities.",
                     "Run: winget upgrade --all",
                 )
@@ -2790,6 +3124,29 @@ def _check_packages_windows(reporter):
             pass
     reporter.ok("No pending package upgrades detected via winget")
     reporter.end()
+
+
+def _parse_winget_upgrade_count(stdout: str) -> int:
+    """Robustly count upgradeable packages from `winget upgrade` output.
+
+    Prefers the explicit '<N> upgrades available' summary line; falls back to
+    counting rows between the '---' header rule and the summary/blank line.
+    """
+    m = re.search(r"(\d+)\s+upgrades?\s+available", stdout, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    lines = stdout.splitlines()
+    try:
+        sep = next(i for i, l in enumerate(lines) if set(l.strip()) == {"-"} and len(l.strip()) > 10)
+    except StopIteration:
+        return 0
+    count = 0
+    for l in lines[sep + 1:]:
+        s = l.strip()
+        if not s or re.match(r"^\d+\s+upgrades?", s, re.IGNORECASE):
+            break
+        count += 1
+    return count
 
 
 def _parse_apt_upgradeable(stdout):
@@ -3040,6 +3397,10 @@ def _check_system_cleaner_windows(reporter):
             )
             found_any = True
 
+    # Browser + dev caches (shared with all platforms)
+    if _cleaner_common_caches(reporter) > 0:
+        found_any = True
+
     if not found_any:
         reporter.ok("System is clean — no significant reclaimable space found.")
     reporter.end()
@@ -3050,6 +3411,9 @@ def check_system_cleaner(reporter):
     journal bloat, crash reports, temp junk, dpkg debris."""
     if _OS == "Windows":
         _check_system_cleaner_windows(reporter)
+        return
+    if _OS == "Darwin":
+        _check_system_cleaner_macos(reporter)
         return
     reporter.begin("SYSTEM CLEANER", "scanning for reclaimable disk space and system debris")
     import glob as _glob
@@ -3246,8 +3610,363 @@ def check_system_cleaner(reporter):
             found_any = True
 
     if not found_any:
+        found_any = _cleaner_common_caches(reporter) > 0
+    else:
+        _cleaner_common_caches(reporter)
+
+    if not found_any:
         reporter.ok("System is clean — no significant reclaimable space found.")
 
+    reporter.end()
+
+
+# ── Cross-platform caches (CCleaner parity) ────────────────────────────────────
+
+def _browser_cache_dirs() -> list:
+    """Return (browser_name, cache_dir) pairs per platform."""
+    home = os.path.expanduser("~")
+    if _OS == "Windows":
+        la = os.environ.get("LOCALAPPDATA", os.path.join(home, "AppData", "Local"))
+        return [
+            ("Chrome",  os.path.join(la, "Google", "Chrome", "User Data", "Default", "Cache")),
+            ("Edge",    os.path.join(la, "Microsoft", "Edge", "User Data", "Default", "Cache")),
+            ("Brave",   os.path.join(la, "BraveSoftware", "Brave-Browser", "User Data", "Default", "Cache")),
+            ("Firefox", os.path.join(la, "Mozilla", "Firefox", "Profiles")),
+        ]
+    if _OS == "Darwin":
+        c = os.path.join(home, "Library", "Caches")
+        return [
+            ("Chrome",  os.path.join(c, "Google", "Chrome")),
+            ("Edge",    os.path.join(c, "Microsoft Edge")),
+            ("Brave",   os.path.join(c, "BraveSoftware")),
+            ("Firefox", os.path.join(c, "Firefox")),
+            ("Safari",  os.path.join(c, "com.apple.Safari")),
+        ]
+    c = os.environ.get("XDG_CACHE_HOME") or os.path.join(home, ".cache")
+    return [
+        ("Chrome",   os.path.join(c, "google-chrome")),
+        ("Chromium", os.path.join(c, "chromium")),
+        ("Brave",    os.path.join(c, "BraveSoftware")),
+        ("Firefox",  os.path.join(c, "mozilla")),
+    ]
+
+
+def _dev_cache_dirs() -> list:
+    """pip / npm caches — often gigabytes on developer machines."""
+    home = os.path.expanduser("~")
+    out = []
+    if _OS == "Windows":
+        la = os.environ.get("LOCALAPPDATA", os.path.join(home, "AppData", "Local"))
+        out.append(("pip cache", os.path.join(la, "pip", "cache")))
+        out.append(("npm cache", os.path.join(os.environ.get("APPDATA", os.path.join(home, "AppData", "Roaming")), "npm-cache")))
+    elif _OS == "Darwin":
+        out.append(("pip cache", os.path.join(home, "Library", "Caches", "pip")))
+        out.append(("npm cache", os.path.join(home, ".npm")))
+    else:
+        c = os.environ.get("XDG_CACHE_HOME") or os.path.join(home, ".cache")
+        out.append(("pip cache", os.path.join(c, "pip")))
+        out.append(("npm cache", os.path.join(home, ".npm")))
+    return out
+
+
+def _cleaner_common_caches(reporter) -> int:
+    """Browser + developer caches on every platform. Returns finding count.
+
+    Browsers rebuild their caches automatically; we only flag them above
+    150 MB so the recommendation is always worth the rebuild cost.
+    """
+    n = 0
+    for name, d in _browser_cache_dirs():
+        if not os.path.isdir(d):
+            continue
+        mb = _dir_size_mb(d)
+        if mb >= 150:
+            if _OS == "Windows":
+                cmd = f'powershell -Command Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "{d}\\*"'
+            else:
+                cmd = f"rm -rf {shlex.quote(d)}/*"
+            reporter.finding(
+                "INFO", f"{name} browser cache: {mb} MB",
+                f"{name}'s cache at {d} will be rebuilt automatically — safe to clear "
+                "(close the browser first).",
+                "Clear it from the browser's own settings, or use the fix below.",
+                fix_cmds=[cmd],
+            )
+            n += 1
+    for name, d in _dev_cache_dirs():
+        if not os.path.isdir(d):
+            continue
+        mb = _dir_size_mb(d)
+        if mb >= 200:
+            tool = "pip cache purge" if "pip" in name else "npm cache clean --force"
+            reporter.finding(
+                "INFO", f"{name}: {mb} MB",
+                f"Package-manager download cache at {d}. Packages re-download on demand.",
+                f"Run: {tool}",
+                fix_cmds=[tool],
+            )
+            n += 1
+    return n
+
+
+# ── macOS cleaner ───────────────────────────────────────────────────────────────
+
+def _check_system_cleaner_macos(reporter):
+    """macOS reclaimable space: user caches, Trash, logs, Xcode debris,
+    iOS device backups, Homebrew cache, stale temp files.
+
+    (Previously the Cleaner tab fell through to the Linux apt/dpkg/journalctl
+    path on macOS and reported nothing.)
+    """
+    reporter.begin("SYSTEM CLEANER (macOS)",
+                   "scanning for reclaimable disk space and system debris")
+    home = os.path.expanduser("~")
+    found_any = False
+
+    # 1. User caches (~/Library/Caches) — biggest single win on most Macs
+    caches = os.path.join(home, "Library", "Caches")
+    mb = _dir_size_mb(caches)
+    if mb >= 200:
+        reporter.finding(
+            "REVIEW", f"User app caches: {mb} MB",
+            f"~/Library/Caches holds {mb} MB of per-app cache data. Apps rebuild "
+            "their caches automatically; clearing is safe but makes first launches slower.",
+            "Review large folders inside ~/Library/Caches and delete the ones you recognize.",
+        )
+        found_any = True
+
+    # 2. Trash
+    trash = os.path.join(home, ".Trash")
+    mb = _dir_size_mb(trash)
+    if mb >= 100:
+        reporter.finding(
+            "INFO", f"Trash: {mb} MB",
+            "Files in the Trash still occupy disk space until emptied.",
+            "Finder → Empty Trash, or use the fix below.",
+            fix_cmds=[f"rm -rf {shlex.quote(trash)}/*"],
+        )
+        found_any = True
+
+    # 3. User logs
+    logs = os.path.join(home, "Library", "Logs")
+    mb = _dir_size_mb(logs)
+    if mb >= 100:
+        reporter.finding(
+            "INFO", f"User logs: {mb} MB",
+            "~/Library/Logs accumulates diagnostic logs apps never clean up.",
+            "Safe to clear — apps recreate logs as needed.",
+            fix_cmds=[f"rm -rf {shlex.quote(logs)}/*"],
+        )
+        found_any = True
+
+    # 4. Xcode DerivedData + old simulators (developer machines)
+    derived = os.path.join(home, "Library", "Developer", "Xcode", "DerivedData")
+    mb = _dir_size_mb(derived)
+    if mb >= 500:
+        reporter.finding(
+            "REVIEW", f"Xcode DerivedData: {mb} MB",
+            "Xcode build intermediates — fully regenerated on the next build.",
+            "Safe to clear.",
+            fix_cmds=[f"rm -rf {shlex.quote(derived)}/*"],
+        )
+        found_any = True
+
+    # 5. iOS device backups
+    backups = os.path.join(home, "Library", "Application Support", "MobileSync", "Backup")
+    mb = _dir_size_mb(backups)
+    if mb >= 1000:
+        reporter.finding(
+            "REVIEW", f"iOS device backups: {mb} MB",
+            "Old iPhone/iPad backups can occupy tens of GB. Only remove backups "
+            "for devices you no longer need to restore.",
+            "Manage in: System Settings → General → Storage → iOS Files, "
+            "or Finder → device → Manage Backups.",
+        )
+        found_any = True
+
+    # 6. Homebrew cache
+    if shutil.which("brew"):
+        try:
+            r = subprocess.run(["brew", "cleanup", "--dry-run"],
+                               capture_output=True, text=True, errors="replace", timeout=60)
+            m = re.search(r"would free approximately ([\d.,]+\s*[KMGT]?B)", r.stdout, re.IGNORECASE)
+            freed = m.group(1) if m else None
+            if freed or "Would remove" in r.stdout:
+                reporter.finding(
+                    "INFO",
+                    f"Homebrew cleanup would free {freed}" if freed else "Homebrew has removable cache/old versions",
+                    "Old formula versions and download cache kept by Homebrew.",
+                    "Run: brew cleanup",
+                    fix_cmds=["brew cleanup"],
+                )
+                found_any = True
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+    # 7. Large stale temp files
+    old_tmp = []
+    for tdir in ("/private/tmp", "/var/tmp"):
+        try:
+            for entry in os.scandir(tdir):
+                try:
+                    st = entry.stat()
+                    age_days = (time.time() - st.st_mtime) / 86400
+                    size_mb  = st.st_size // (1024 * 1024)
+                    if age_days > 7 and size_mb >= 10:
+                        old_tmp.append((entry.path, size_mb))
+                except OSError:
+                    pass
+        except OSError:
+            pass
+    if old_tmp:
+        total_mb = sum(s for _, s in old_tmp)
+        reporter.finding(
+            "INFO", f"{len(old_tmp)} large stale temp file(s) ({total_mb} MB)",
+            "Files > 10 MB in temp directories not touched in 7+ days.",
+            "Remove old temp files.",
+            fix_cmds=[f"rm -rf {shlex.quote(p)}" for p, _ in old_tmp[:15]],
+        )
+        found_any = True
+
+    # 8. Browser + dev caches (shared with all platforms)
+    if _cleaner_common_caches(reporter) > 0:
+        found_any = True
+
+    if not found_any:
+        reporter.ok("System is clean — no significant reclaimable space found.")
+    reporter.end()
+
+
+# ── Startup programs audit ──────────────────────────────────────────────────────
+
+# For the "I want more FPS" user this is the single highest-impact check:
+# every auto-start program eats RAM, CPU and boot time forever.
+
+_WIN_RUN_KEYS = [
+    r"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+    r"HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run",
+    r"HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+]
+
+
+def _check_startup_windows(reporter):
+    items = []
+    for key in _WIN_RUN_KEYS:
+        out, rc = _ps(
+            f"Get-ItemProperty -Path '{key}' -ErrorAction SilentlyContinue | "
+            "Select-Object -Property * -ExcludeProperty PS* | ConvertTo-Json"
+        )
+        if rc != 0 or not out.strip():
+            continue
+        try:
+            props = json.loads(out)
+            if isinstance(props, list):
+                props = props[0] if props else {}
+            for name, val in props.items():
+                if isinstance(val, str) and val.strip():
+                    items.append((name, val, key))
+        except Exception:
+            pass
+    # Startup folders
+    for env, label in (("APPDATA", "user Startup folder"), ("PROGRAMDATA", "all-users Startup folder")):
+        base = os.environ.get(env)
+        if not base:
+            continue
+        folder = os.path.join(base, "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
+        try:
+            for entry in os.scandir(folder):
+                if entry.name.lower() not in ("desktop.ini",):
+                    items.append((entry.name, entry.path, label))
+        except OSError:
+            pass
+    if not items:
+        reporter.ok("No third-party startup programs found")
+        return 0
+    reporter.finding(
+        "REVIEW", f"{len(items)} program(s) launch at startup",
+        "Every auto-start program consumes RAM and CPU in the background and "
+        "slows boot — the most common cause of 'my PC got slower over time'. "
+        "Startup items: " + ", ".join(n for n, _, _ in items[:12])
+        + ("…" if len(items) > 12 else ""),
+        "Review in Task Manager → Startup apps. Disable anything you don't need "
+        "running the moment you log in (updaters, helpers, launchers).",
+    )
+    return 1
+
+
+def _check_startup_macos(reporter):
+    home = os.path.expanduser("~")
+    items = []
+    for d, scope in [
+        (os.path.join(home, "Library", "LaunchAgents"), "user agent"),
+        ("/Library/LaunchAgents", "system agent"),
+        ("/Library/LaunchDaemons", "system daemon"),
+    ]:
+        try:
+            for entry in sorted(os.listdir(d)):
+                if entry.endswith(".plist") and not entry.startswith("com.apple."):
+                    items.append((entry[:-6], scope))
+        except OSError:
+            pass
+    # Login Items (modern macOS)
+    try:
+        r = subprocess.run(
+            ["osascript", "-e", 'tell application "System Events" to get the name of every login item'],
+            capture_output=True, text=True, errors="replace", timeout=15,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            for name in r.stdout.strip().split(", "):
+                if name:
+                    items.append((name, "login item"))
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    if not items:
+        reporter.ok("No third-party startup items found")
+        return 0
+    reporter.finding(
+        "REVIEW", f"{len(items)} item(s) launch at login/boot",
+        "Each launch agent, daemon, and login item consumes memory and CPU in "
+        "the background. Items: " + ", ".join(n for n, _ in items[:12])
+        + ("…" if len(items) > 12 else ""),
+        "Review in System Settings → General → Login Items & Extensions. "
+        "Remove plists you don't recognize from ~/Library/LaunchAgents.",
+    )
+    return 1
+
+
+def _check_startup_linux(reporter):
+    home = os.path.expanduser("~")
+    autostart = os.path.join(
+        os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config"), "autostart")
+    items = []
+    try:
+        for entry in sorted(os.listdir(autostart)):
+            if entry.endswith(".desktop"):
+                items.append(entry[:-8])
+    except OSError:
+        pass
+    if not items:
+        reporter.ok("No user autostart entries found")
+        return 0
+    reporter.finding(
+        "REVIEW", f"{len(items)} autostart entr(y/ies): " + ", ".join(items[:12])
+        + ("…" if len(items) > 12 else ""),
+        "Desktop autostart entries run at every login and consume resources.",
+        f"Review and remove unneeded .desktop files in {autostart}",
+    )
+    return 1
+
+
+def check_startup(reporter):
+    """Audit programs configured to launch at boot/login."""
+    reporter.begin("STARTUP PROGRAMS",
+                   "programs that auto-launch and quietly consume RAM/CPU")
+    if _OS == "Windows":
+        _check_startup_windows(reporter)
+    elif _OS == "Darwin":
+        _check_startup_macos(reporter)
+    else:
+        _check_startup_linux(reporter)
     reporter.end()
 
 
@@ -3843,6 +4562,7 @@ def run_headless_scan(tabs: list = None, notify: bool = True) -> None:
                 check_malware(reporter)
             elif tab == "cleaner":
                 check_system_cleaner(reporter)
+                check_startup(reporter)
         except Exception:
             continue
         score, grade = _compute_score(reporter._data)
@@ -4221,10 +4941,16 @@ def restore_snapshot(snap):
             results.append((f"restore {path}", False, str(e)))
 
     if "/etc/ssh/sshd_config" in snap.get("files", {}):
-        rc, out = _run_fix_cmd(
-            "systemctl reload-or-restart ssh 2>/dev/null "
-            "|| systemctl reload-or-restart sshd 2>/dev/null || true"
-        )
+        if _OS == "Windows":
+            sshd_cmd = "Restart-Service sshd -ErrorAction SilentlyContinue"
+        elif _OS == "Darwin":
+            sshd_cmd = "launchctl kickstart -k system/com.openssh.sshd 2>/dev/null || true"
+        else:
+            sshd_cmd = (
+                "systemctl reload-or-restart ssh 2>/dev/null "
+                "|| systemctl reload-or-restart sshd 2>/dev/null || true"
+            )
+        rc, out = _run_fix_cmd(sshd_cmd)
         results.append(("reload sshd", rc == 0, out.strip()[:120]))
 
     ufw_rules = snap.get("ufw_rules", "")
@@ -4253,14 +4979,20 @@ def restore_snapshot(snap):
 def _run_fix_cmd(cmd):
     """Run a single shell fix command. Returns (returncode, combined_output)."""
     try:
+        if _OS == "Windows":
+            result = subprocess.run(
+                ["powershell", "-NonInteractive", "-NoProfile", "-Command", cmd],
+                capture_output=True, text=True, timeout=120,
+            )
+            return result.returncode, (result.stdout + result.stderr).strip()
         result = subprocess.run(
             cmd, shell=True, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            timeout=30,
+            timeout=60,
         )
         return result.returncode, result.stdout.strip()
     except subprocess.TimeoutExpired:
-        return 1, "timed out after 30 s"
+        return 1, "timed out"
     except OSError as e:
         return 1, str(e)
 
@@ -4536,6 +5268,8 @@ def _schedule_main(argv):
 
 
 def _read_full_crontab():
+    if _OS == "Windows":
+        return []
     result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
     if result.returncode != 0:
         return []
@@ -4598,15 +5332,16 @@ def install_schedule(sched: dict) -> tuple:
         return _install_schedule_windows(sched)
     # Linux: existing crontab approach
     try:
-        py      = shlex.quote(sys.executable)
-        script  = shlex.quote(os.path.abspath(__file__))
+        # _self_invocation() handles the frozen (PyInstaller) app, whose
+        # __file__ points into a temp dir that vanishes when the app exits.
+        invoke  = " ".join(shlex.quote(p) for p in _self_invocation())
         tabs    = " ".join(shlex.quote(t) for t in sched.get("tabs", ["security"]))
         hour    = int(sched.get("hour", 9))
         minute  = int(sched.get("minute", 0))
         existing = _read_full_crontab()
         cleaned  = _strip_ec_lines(existing)
         if sched.get("enabled"):
-            cmd  = f"{py} {script} headless --tabs {tabs}"
+            cmd  = f"{invoke} headless --tabs {tabs}"
             line = f"{minute} {hour} * * * {cmd}  {_CRON_MARKER}"
             _write_crontab(cleaned + [line])
         else:
@@ -4635,8 +5370,7 @@ def _install_schedule_macos(sched: dict) -> tuple:
         hour   = int(sched.get("hour", 9))
         minute = int(sched.get("minute", 0))
         tabs   = sched.get("tabs", ["security"])
-        py     = sys.executable
-        script = os.path.abspath(__file__)
+        invoke = _self_invocation()  # frozen-app safe
         plist  = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -4644,8 +5378,7 @@ def _install_schedule_macos(sched: dict) -> tuple:
   <key>Label</key><string>{label}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>{py}</string>
-    <string>{script}</string>
+    {''.join(f'<string>{p}</string>' for p in invoke)}
     <string>headless</string>
     <string>--tabs</string>
     {''.join(f'<string>{t}</string>' for t in tabs)}
@@ -4678,11 +5411,13 @@ def _install_schedule_windows(sched: dict) -> tuple:
         hour   = int(sched.get("hour", 9))
         minute = int(sched.get("minute", 0))
         tabs   = " ".join(sched.get("tabs", ["security"]))
-        py     = sys.executable
-        script = os.path.abspath(__file__)
+        invoke = _self_invocation()  # frozen-app safe
+        exe    = invoke[0]
+        arg_parts = [f'\\"{p}\\"' for p in invoke[1:]] + ["headless", "--tabs", tabs]
+        arg_str   = " ".join(arg_parts)
         cmd = (
-            f'$action = New-ScheduledTaskAction -Execute "{py}" '
-            f'-Argument "{script} headless --tabs {tabs}"; '
+            f'$action = New-ScheduledTaskAction -Execute "{exe}" '
+            f'-Argument "{arg_str}"; '
             f'$trigger = New-ScheduledTaskTrigger -Daily -At "{hour:02d}:{minute:02d}"; '
             f'Register-ScheduledTask -TaskName "{task_name}" '
             f'-Action $action -Trigger $trigger -RunLevel Highest -Force'
@@ -4765,6 +5500,10 @@ def main():
     parser.add_argument("--malware-paths", nargs="+", metavar="PATH",
                         help="Override default paths for the ClamAV scan "
                              f"(default: {', '.join(_AV_CLAMAV_PATHS)}).")
+    parser.add_argument("--check-startup", action="store_true",
+                        help="Audit programs configured to launch at boot/login.")
+    parser.add_argument("--check-cleaner", action="store_true",
+                        help="Scan for reclaimable disk space (caches, temp junk, debris).")
     parser.add_argument("--full-audit", action="store_true",
                         help="Run all local checks (port scan + SSH + firewall + "
                              "listeners + world-writable + SUID + cron + packages + "
@@ -4852,14 +5591,22 @@ def main():
     if args.check_malware or args.full_audit:
         check_malware(reporter, clamav_paths=args.malware_paths or None)
 
+    if args.check_startup or args.full_audit:
+        check_startup(reporter)
+
+    if args.check_cleaner:
+        check_system_cleaner(reporter)
+
     if args.tls_check:
         check_tls(reporter, args.tls_check)
 
     if args.trivy_scan is not None:
         scan_trivy(reporter, args.trivy_scan)
 
+    score, grade = _compute_score(reporter._data)
+    reporter._data["score"] = score
+    reporter._data["grade"] = grade
     if not args.json:
-        score, grade = _compute_score(reporter._data)
         bar = "█" * (score // 5) + "░" * (20 - score // 5)
         counts: dict[str, int] = {}
         for chk in reporter._data.get("checks", []):
