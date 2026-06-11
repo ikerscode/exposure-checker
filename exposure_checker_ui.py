@@ -778,15 +778,8 @@ def _batch_fix_windows(cmds):
     try:
         with os.fdopen(fd, "w", encoding="utf-8-sig") as fh:
             fh.write("\n".join(lines) + "\n")
-        runner = (
-            f"$p = Start-Process powershell.exe -ArgumentList "
-            f"'-NoProfile','-ExecutionPolicy','Bypass',"
-            f"'-File','\"{script_path}\"' "
-            f"-Verb RunAs -Wait -PassThru "
-            f"-RedirectStandardOutput '{out_path}'; $p.ExitCode"
-        )
-        # NOTE: -Verb RunAs + -RedirectStandardOutput is invalid together,
-        # so redirect inside the elevated script instead:
+        # -Verb RunAs + -RedirectStandardOutput is invalid together;
+        # redirect inside the elevated script instead:
         runner = (
             f"$p = Start-Process powershell.exe -ArgumentList "
             f"'-NoProfile','-ExecutionPolicy','Bypass','-Command',"
@@ -2279,18 +2272,19 @@ class VeniceSplash:
     _TICK_MS  = 36    # ~28 fps
 
     _SKY_STOPS = [
-        (0.00, "#06021a"),
-        (0.30, "#150c38"),
-        (0.55, "#4a1640"),
-        (0.72, "#b03030"),
-        (0.84, "#d86028"),
-        (0.93, "#f0a020"),
-        (1.00, "#ffc840"),
+        (0.00, "#0a0e30"),   # deep midnight blue at zenith
+        (0.22, "#1a1658"),   # rich indigo
+        (0.43, "#4a1e5a"),   # warm violet
+        (0.60, "#8a2840"),   # crimson-purple
+        (0.74, "#c84030"),   # rich vermillion
+        (0.86, "#e06020"),   # burnt orange
+        (0.94, "#f09030"),   # warm amber
+        (1.00, "#ffc050"),   # golden at horizon
     ]
 
     # Camera / projection
     _F        = 240.0   # focal length (px)
-    _CANAL_HW = 2.3     # canal half-width (world units)
+    _CANAL_HW = 2.6     # canal half-width (world units)
     _CAM_H    = 1.6     # camera height above water
     _NEAR     = 0.9
     _FAR      = 34.0
@@ -2352,44 +2346,72 @@ class VeniceSplash:
 
     def _draw_sky(self):
         cnv, w, hz = self._cnv, self.W, self._hz
-        bands = 44
+        bands = 50
         for i in range(bands):
             y0 = int(i / bands * hz)
             y1 = int((i + 1) / bands * hz) + 1
             cnv.create_rectangle(0, y0, w, y1, outline="",
                                  fill=self._lerp(self._SKY_STOPS, i / bands))
         rng = random.Random(7)
-        for _ in range(55):
-            sx, sy = rng.randint(0, w), rng.randint(0, int(hz * 0.5))
-            b = rng.randint(140, 235)
+        for _ in range(38):
+            sx = rng.randint(0, w)
+            sy = rng.randint(0, int(hz * 0.45))
+            b  = rng.randint(155, 225)
             cnv.create_oval(sx - 1, sy - 1, sx + 1, sy + 1, outline="",
-                            fill=f"#{b:02x}{b:02x}{min(b+30,255):02x}")
-        # Low sun glow at the vanishing point
+                            fill=f"#{b:02x}{b:02x}{min(b+25,255):02x}")
+        # Sun glow at the vanishing point — warm and prominent
         vx = w // 2
-        for gr, col in ((46, "#7a3418"), (30, "#c05a1c"), (16, "#f0a23a"), (8, "#ffd980")):
-            cnv.create_oval(vx - gr, hz - gr // 2 - 6, vx + gr, hz + gr // 2 - 6,
+        for gr, col in ((62, "#4a1c08"), (44, "#903818"), (28, "#d06018"),
+                        (14, "#f09030"), (7, "#ffe070")):
+            cnv.create_oval(vx - gr, hz - gr // 2 - 6,
+                            vx + gr, hz + gr // 2 - 6,
                             fill=col, outline="")
-        # Static water base
-        cnv.create_rectangle(0, hz, w, self.H, fill="#071226", outline="")
+        # Water base — deep Venice canal blue-green
+        cnv.create_rectangle(0, hz, w, self.H, fill="#091c2e", outline="")
+        # Sun path on water — amber streak toward the camera
+        for i in range(10):
+            sy0 = hz + 4 + i * max(1, (self.H - hz - 10) // 10)
+            sy1 = sy0 + max(1, (self.H - hz - 10) // 10) + 2
+            alpha = 1.0 - i * 0.09
+            hw_streak = max(1, int(28 * alpha * alpha))
+            cnv.create_rectangle(vx - hw_streak, sy0, vx + hw_streak, sy1,
+                                 fill=self._shade("#d86018", alpha), outline="")
 
     # ── World generation ──────────────────────────────────────────────────────
 
-    _FACADE_COLS = ["#3a2430", "#402a22", "#2e2436", "#38301f", "#341f28", "#2b2a3c"]
+    # Venetian plaster palette — terracotta, ochre, dusty rose, warm neutrals
+    _FACADE_COLS = [
+        "#c8703a", "#d49040", "#be5838", "#c89828",
+        "#c86858", "#a86030", "#d0a038", "#b86848", "#cc8060",
+    ]
+    _STONE_COL = "#c8b890"   # pale limestone at waterline
 
     def _gen_segment(self, z0):
         rng = self._rng
+        _pole_schemes = [
+            ("#1a3a8a", "#f0f0f8"),   # blue / white
+            ("#c03020", "#f0f0f8"),   # red / white
+            ("#1a3a8a", "#c03020"),   # blue / red
+            ("#246020", "#f0d030"),   # green / gold
+            ("#1a3a8a", "#f0e030"),   # blue / gold
+        ]
         return {
             "z0": z0,
-            "len": rng.uniform(2.2, 4.0),
-            "lh": rng.uniform(2.6, 5.2),      # left facade height
-            "rh": rng.uniform(2.6, 5.2),      # right facade height
-            "lc": rng.choice(self._FACADE_COLS),
-            "rc": rng.choice(self._FACADE_COLS),
-            "lwin": rng.randint(1, 3),        # lit window rows
-            "rwin": rng.randint(1, 3),
-            "pole": rng.random() < 0.55,      # mooring pole on this segment
+            "len":     rng.uniform(2.8, 5.0),
+            "lh":      rng.uniform(3.6, 5.4),
+            "rh":      rng.uniform(3.6, 5.4),
+            "lc":      rng.choice(self._FACADE_COLS),
+            "rc":      rng.choice(self._FACADE_COLS),
+            "lwin":    rng.randint(2, 3),
+            "rwin":    rng.randint(2, 3),
+            "lncols":  rng.randint(3, 5),
+            "rncols":  rng.randint(3, 5),
+            "pole":      rng.random() < 0.55,
             "pole_side": rng.choice((-1, 1)),
-            "arch": rng.random() < 0.10,      # bridge arch across the canal
+            "pole_cols": rng.choice(_pole_schemes),
+            "arch":      rng.random() < 0.22,
+            "chimney":   rng.random() < 0.50,
+            "chim_off":  rng.uniform(0.2, 0.8),
         }
 
     def _gen_segments(self):
@@ -2433,96 +2455,152 @@ class VeniceSplash:
             if z0 >= self._FAR:
                 continue
             z1 = min(z1, self._FAR)
-            fog = max(0.22, 1.0 - (z0 / self._FAR) * 0.9)   # distance dimming
+            fog = max(0.22, 1.0 - (z0 / self._FAR) * 0.9)
 
-            for side, height, col, wins in (
-                (-1, seg["lh"], seg["lc"], seg["lwin"]),
-                (+1, seg["rh"], seg["rc"], seg["rwin"]),
+            for side, height, fac_col, nrows, ncols in (
+                (-1, seg["lh"], seg["lc"], seg["lwin"], seg["lncols"]),
+                (+1, seg["rh"], seg["rc"], seg["rwin"], seg["rncols"]),
             ):
                 x = side * hw
-                bx0, by0, _ = self._proj(x, 0, z0)          # waterline near
-                bx1, by1, _ = self._proj(x, 0, z1)          # waterline far
-                tx0, ty0, _ = self._proj(x, height, z0)     # rooftop near
-                tx1, ty1, _ = self._proj(x, height, z1)     # rooftop far
-                fc = self._shade(col, fog)
+                bx0, by0, _ = self._proj(x, 0,      z0)
+                bx1, by1, _ = self._proj(x, 0,      z1)
+                tx0, ty0, _ = self._proj(x, height, z0)
+                tx1, ty1, _ = self._proj(x, height, z1)
+                fc = self._shade(fac_col, fog)
+
+                # Main plaster facade
                 cnv.create_polygon(bx0, by0, bx1, by1, tx1, ty1, tx0, ty0,
-                                   fill=fc, outline=self._shade(fc, 0.8),
+                                   fill=fc, outline=self._shade(fc, 0.72),
                                    tags="scene")
-                # Lit windows + their water reflection
-                if z0 < 18:
-                    for wi in range(wins):
-                        wz = z0 + (z1 - z0) * (0.25 + 0.5 * wi / max(1, wins - 1) if wins > 1 else 0.5)
-                        wy = height * (0.35 + 0.18 * wi)
-                        wx, wys, s = self._proj(x, wy, wz)
-                        r = max(1, int(s * 0.10))
-                        warm = "#ffce6a" if (wi + seg["lwin"]) % 2 else "#ffb04a"
-                        cnv.create_rectangle(wx - r, wys - r * 1.4, wx + r, wys + r * 1.4,
-                                             fill=self._shade(warm, fog), outline="",
-                                             tags="scene")
-                        rx, rys, _ = self._proj(x * 0.92, -wy * 0.35, wz)
-                        cnv.create_line(rx - r, rys, rx + r, rys,
-                                        fill=self._shade("#a96f2e", fog), tags="scene")
 
-            # Mooring pole rising out of the water
+                # Pale limestone base band at waterline
+                sbx0, sby0, _ = self._proj(x, 0.45, z0)
+                sbx1, sby1, _ = self._proj(x, 0.45, z1)
+                cnv.create_polygon(bx0, by0, bx1, by1, sbx1, sby1, sbx0, sby0,
+                                   fill=self._shade(self._STONE_COL, fog * 0.88),
+                                   outline="", tags="scene")
+
+                # Rooftop cornice line
+                cnv.create_line(tx0, ty0, tx1, ty1,
+                                fill=self._shade(fac_col, fog * 0.50),
+                                width=2, tags="scene")
+
+                # Arched windows in a grid
+                if z0 < 22:
+                    for ri in range(nrows):
+                        wy = height * (0.33 + 0.26 * ri / max(1, nrows))
+                        for ci in range(ncols):
+                            wz = z0 + (z1 - z0) * ((ci + 0.5) / ncols)
+                            wpx, wpys, ws = self._proj(x, wy, wz)
+                            wr = max(1, int(ws * 0.10))
+                            warm = "#ffce6a" if (ri + ci) % 2 == 0 else "#ffb040"
+                            wc = self._shade(warm, fog * 1.15)
+                            # Window body
+                            cnv.create_rectangle(
+                                wpx - wr, wpys - int(wr * 1.0),
+                                wpx + wr, wpys + int(wr * 0.7),
+                                fill=wc, outline="", tags="scene")
+                            # Gothic arched top
+                            cnv.create_oval(
+                                wpx - wr, wpys - int(wr * 1.8),
+                                wpx + wr, wpys - int(wr * 0.2),
+                                fill=wc, outline="", tags="scene")
+                            # Water reflection — vertical amber smear
+                            if fog > 0.45 and ws > 8 and wpys < self._hz:
+                                rfl_y = self._hz + (self._hz - wpys) * 0.45
+                                rfl_len = max(1, int(wr * 2.0))
+                                cnv.create_line(wpx, rfl_y, wpx, rfl_y + rfl_len,
+                                                fill=self._shade("#b05820", fog * 0.55),
+                                                width=max(1, wr), tags="scene")
+
+                # Chimney pots on rooftop
+                if seg["chimney"] and z0 < 16:
+                    chz = z0 + (z1 - z0) * seg["chim_off"]
+                    chx_w, chys, chs = self._proj(x, height, chz)
+                    ch_off = int(chs * 0.5 * (-side))
+                    ch_h   = max(2, int(chs * 0.28))
+                    ch_w   = max(1, int(chs * 0.09))
+                    chx_s  = int(chx_w) + ch_off
+                    cnv.create_rectangle(chx_s - ch_w, chys - ch_h,
+                                         chx_s + ch_w, chys,
+                                         fill=self._shade("#4a2810", fog),
+                                         outline="", tags="scene")
+                    cnv.create_oval(chx_s - ch_w - 1, chys - ch_h - ch_w,
+                                    chx_s + ch_w + 1, chys - ch_h + ch_w,
+                                    fill=self._shade("#2a1406", fog),
+                                    outline="", tags="scene")
+
+            # Striped mooring pole (palo da ormeggio)
             if seg["pole"] and z0 < 16:
-                px = seg["pole_side"] * (hw - 0.45)
-                pz = (z0 + z1) / 2
-                x0, y0, s = self._proj(px, 0, pz)
-                x1, y1, _ = self._proj(px, 1.5, pz)
-                wpx = max(1, int(s * 0.05))
-                cnv.create_line(x0, y0, x1, y1, width=wpx * 2,
-                                fill=self._shade("#1c2f50", max(0.4, 1 - pz / 20)),
-                                tags="scene")
-                cnv.create_oval(x1 - wpx * 2, y1 - wpx * 2, x1 + wpx * 2, y1 + wpx * 2,
-                                fill="#24406a", outline="", tags="scene")
+                ppx = seg["pole_side"] * (hw - 0.35)
+                ppz = (z0 + z1) / 2
+                px0, py0, ps = self._proj(ppx, 0,   ppz)
+                px1, py1, _  = self._proj(ppx, 2.0, ppz)
+                pwx  = max(1, int(ps * 0.07))
+                fade = max(0.4, 1.0 - ppz / 20)
+                pc1, pc2 = seg["pole_cols"]
+                for bi in range(5):
+                    bt  = bi / 5
+                    bt2 = (bi + 1) / 5
+                    py_top = py0 + (py1 - py0) * bt
+                    py_bot = py0 + (py1 - py0) * bt2
+                    pc = self._shade(pc1 if bi % 2 == 0 else pc2, fade)
+                    cnv.create_line(px0, py_top, px0, py_bot,
+                                    fill=pc, width=pwx * 2, tags="scene")
+                cnv.create_oval(px0 - pwx*2, py1 - pwx*2,
+                                px0 + pwx*2, py1 + pwx*2,
+                                fill=self._shade("#2a3850", fade),
+                                outline="", tags="scene")
 
-            # Bridge arch spanning the canal — drawn as a thin stone band that
-            # follows an arc, leaving the water open underneath (a Rialto-style
-            # silhouette rather than a solid block).
+            # Bridge arch spanning the canal
             if seg["arch"] and self._NEAR + 3 < z0 < 20:
                 az = (z0 + z1) / 2
                 fogc = self._shade("#241620", max(0.35, 1 - az / 22))
-                deck_h, rise = 2.2, 1.5     # springer height, crown rise
+                deck_h, rise = 2.2, 1.5
                 steps = 14
                 top_pts, bot_pts = [], []
                 for k in range(steps + 1):
-                    u = k / steps                       # 0..1 across canal
+                    u  = k / steps
                     wx = (-1 + 2 * u) * hw
                     wy = deck_h + math.sin(u * math.pi) * rise
                     sx, sy, _ = self._proj(wx, wy, az)
                     top_pts.append((sx, sy))
-                    sx2, sy2, _ = self._proj(wx, wy - 0.45, az)  # band thickness
+                    sx2, sy2, _ = self._proj(wx, wy - 0.45, az)
                     bot_pts.append((sx2, sy2))
                 band = top_pts + list(reversed(bot_pts))
                 flat = [c for p in band for c in p]
                 cnv.create_polygon(*flat, fill=fogc,
                                    outline=self._shade(fogc, 1.3),
                                    smooth=True, tags="scene")
-                # A couple of railing posts on the crown
                 for u in (0.42, 0.5, 0.58):
-                    wx = (-1 + 2 * u) * hw
-                    wy = deck_h + math.sin(u * math.pi) * rise
-                    x0, y0, s = self._proj(wx, wy, az)
-                    x1, y1, _ = self._proj(wx, wy + 0.35, az)
-                    cnv.create_line(x0, y0, x1, y1,
+                    wx  = (-1 + 2 * u) * hw
+                    wy  = deck_h + math.sin(u * math.pi) * rise
+                    rx0, ry0, _ = self._proj(wx, wy,        az)
+                    rx1, ry1, _ = self._proj(wx, wy + 0.35, az)
+                    cnv.create_line(rx0, ry0, rx1, ry1,
                                     fill=self._shade("#2e1f2a", max(0.4, 1 - az / 22)),
                                     tags="scene")
 
         # Canal waterline edges converging on the vanishing point
         for side in (-1, 1):
-            x0, y0, _ = self._proj(side * hw, 0, self._NEAR)
-            x1, y1, _ = self._proj(side * hw, 0, self._FAR)
-            cnv.create_line(x0, y0, x1, y1, fill="#13284a", width=2, tags="scene")
+            el_x0, el_y0, _ = self._proj(side * hw, 0, self._NEAR)
+            el_x1, el_y1, _ = self._proj(side * hw, 0, self._FAR)
+            cnv.create_line(el_x0, el_y0, el_x1, el_y1,
+                            fill="#1a3048", width=2, tags="scene")
 
-        # Wake / shimmer lines sliding toward the camera
-        for i in range(7):
-            wz = self._NEAR + ((i * 1.7 + (zc * 1.3 % 1.7))) * 2.2
-            if wz >= self._FAR:
+        # Water shimmer — warm amber near sun path, cooler blue elsewhere
+        for i in range(12):
+            wz_s = self._NEAR + ((i * 1.4 + (zc * 1.2 % 1.4))) * 1.9
+            if wz_s >= self._FAR:
                 continue
-            wx, wy, s = self._proj(0, 0, wz)
-            half = s * (0.4 + (i % 3) * 0.25)
-            cnv.create_line(wx - half, wy, wx + half, wy,
-                            fill="#1a3a64", tags="scene")
+            wsx, wsy, ws_s = self._proj(0, 0, wz_s)
+            whalf = ws_s * (0.45 + (i % 4) * 0.20)
+            if abs(wsx - self.W / 2) / self.W < 0.12:
+                shim_c = self._shade("#c05812", max(0.25, ws_s / 28))
+            else:
+                shim_c = self._shade("#1c3a58", max(0.25, ws_s / 28))
+            cnv.create_line(wsx - whalf, wsy, wsx + whalf, wsy,
+                            fill=shim_c, tags="scene")
 
     def _draw_gull_back(self, t):
         """Third-person seagull seen from behind, leading the camera."""

@@ -873,6 +873,7 @@ def _check_firewall_windows(reporter):
             reporter.end()
     except (json.JSONDecodeError, KeyError):
         reporter.error("Could not parse firewall profile output")
+        reporter.end()
 
 
 def _ufw_enable_cmds(ufw_bin=None):
