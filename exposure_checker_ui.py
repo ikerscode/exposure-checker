@@ -761,44 +761,51 @@ def _batch_fix_macos(cmds):
 def _batch_fix_windows(cmds):
     """Single UAC prompt for ALL fixes on Windows.
 
-    Previously every fix command spawned its own elevated process → one UAC
-    consent dialog *per fix*. Now all commands run inside one elevated,
-    marker-tagged PowerShell script. Output is captured via a temp file
-    because Start-Process -Verb RunAs cannot pipe stdout back.
+    The elevated script writes its own output via Add-Content so we avoid
+    shell-level *> redirection inside a -Command string (unreliable with
+    paths containing spaces, and unavailable in PS < 5). Invoked with -File
+    so no quoting gymnastics are needed in the ArgumentList.
     """
     no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     fd, script_path = tempfile.mkstemp(suffix=".ps1", prefix="ec-fix-")
     out_path = script_path + ".out"
-    lines = ["$ErrorActionPreference = 'Continue'"]
+    ps_out = out_path.replace("'", "''")     # PS single-quote escape
+    ps_scr = script_path.replace("'", "''")  # PS single-quote escape
+
+    lines = [
+        f"$__f = '{ps_out}'",
+        "$ErrorActionPreference = 'Continue'",
+    ]
     for i, cmd in enumerate(cmds):
-        lines.append(f'Write-Output "##ECCMD{i}##"')
-        lines.append(f"& {{ {cmd} }} 2>&1 | Out-String -Stream")
-        lines.append("$code = $LASTEXITCODE; if ($null -eq $code) { if ($?) { $code = 0 } else { $code = 1 } }")
-        lines.append(f'Write-Output ("##ECEXIT{i}:" + $code + "##")')
+        lines += [
+            f'"##ECCMD{i}##" | Add-Content -Path $__f -Encoding UTF8',
+            # Capture $? inside the block before the pipeline consumes it
+            (f"& {{ {cmd} 2>&1; $script:__c ="
+             " if ($LASTEXITCODE) { $LASTEXITCODE }"
+             " elseif ($?) { 0 } else { 1 } }"
+             " | Out-String -Stream | Add-Content -Path $__f -Encoding UTF8"),
+            f'"##ECEXIT{i}:$__c##" | Add-Content -Path $__f -Encoding UTF8',
+        ]
     try:
         with os.fdopen(fd, "w", encoding="utf-8-sig") as fh:
             fh.write("\n".join(lines) + "\n")
-        # -Verb RunAs + -RedirectStandardOutput is invalid together;
-        # redirect inside the elevated script instead:
         runner = (
-            f"$p = Start-Process powershell.exe -ArgumentList "
-            f"'-NoProfile','-ExecutionPolicy','Bypass','-Command',"
-            f"'& \"{script_path}\" *> \"{out_path}\"' "
-            f"-Verb RunAs -Wait -PassThru; $p.ExitCode"
+            f"Start-Process powershell.exe "
+            f"-ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','\"{ps_scr}\"' "
+            f"-Verb RunAs -Wait"
         )
         r = subprocess.run(
             ["powershell", "-NonInteractive", "-NoProfile", "-Command", runner],
             capture_output=True, text=True, errors="replace",
             timeout=max(120, 60 * len(cmds)), creationflags=no_window,
         )
-        if "denied" in (r.stderr or "").lower() or "canceled" in (r.stderr or "").lower():
+        if "denied" in (r.stderr or "").lower() or "cancel" in (r.stderr or "").lower():
             return [(c, 1, "UAC prompt declined") for c in cmds]
-        stdout = ""
         try:
-            with open(out_path, "r", encoding="utf-8", errors="replace") as fh:
+            with open(out_path, encoding="utf-8", errors="replace") as fh:
                 stdout = fh.read()
         except OSError:
-            pass
+            stdout = ""
         if "##ECCMD" not in stdout:
             return [(c, 1, (r.stderr or "elevation failed").strip()) for c in cmds]
         return _parse_batch_output(cmds, stdout)
@@ -1375,6 +1382,7 @@ class ScanTab:
         if not messagebox.askyesno(
             "Apply fixes",
             f"Fix {len(findings)} {noun} ({n_cmd} command(s))?{sudo_note}",
+            parent=self.frame,
         ):
             return
 

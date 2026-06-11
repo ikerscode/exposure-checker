@@ -4981,9 +4981,13 @@ def _run_fix_cmd(cmd):
     """Run a single shell fix command. Returns (returncode, combined_output)."""
     try:
         if _OS == "Windows":
+            no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            # $ErrorActionPreference='Stop' makes cmdlet failures non-zero exit codes
+            full_cmd = f"$ErrorActionPreference = 'Stop'; {cmd}"
             result = subprocess.run(
-                ["powershell", "-NonInteractive", "-NoProfile", "-Command", cmd],
+                ["powershell", "-NonInteractive", "-NoProfile", "-Command", full_cmd],
                 capture_output=True, text=True, timeout=120,
+                creationflags=no_window,
             )
             return result.returncode, (result.stdout + result.stderr).strip()
         result = subprocess.run(
