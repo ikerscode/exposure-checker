@@ -4986,19 +4986,19 @@ def _run_fix_cmd(cmd):
             full_cmd = f"$ErrorActionPreference = 'Stop'; {cmd}"
             result = subprocess.run(
                 ["powershell", "-NonInteractive", "-NoProfile", "-Command", full_cmd],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True, text=True, errors="replace", timeout=120,
                 creationflags=no_window,
             )
             return result.returncode, (result.stdout + result.stderr).strip()
         result = subprocess.run(
-            cmd, shell=True, text=True,
+            cmd, shell=True, text=True, errors="replace",
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             timeout=60,
         )
         return result.returncode, result.stdout.strip()
     except subprocess.TimeoutExpired:
         return 1, "timed out"
-    except OSError as e:
+    except Exception as e:
         return 1, str(e)
 
 

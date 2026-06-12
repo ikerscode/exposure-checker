@@ -1405,6 +1405,13 @@ class ScanTab:
                          daemon=True).start()
 
     def _fix_worker(self, findings):
+        try:
+            self._fix_worker_inner(findings)
+        except Exception as exc:
+            self._q.put(("log", (f"  ✗ Internal error: {exc}\n", "err")))
+            self._q.put(("done_fix", False))
+
+    def _fix_worker_inner(self, findings):
         self._q.put(("log", ("\n── Applying fixes ──\n", "hdr")))
         results = _batch_fix_elevated(findings)
 
@@ -1431,9 +1438,9 @@ class ScanTab:
                 failed += 1
                 self._q.put(("log", (f"  ✗  {label}\n", "err")))
                 for _, rc, out in batch:
-                    if rc != 0 and out:
-                        self._q.put(("log",
-                                     (f"      {out.strip()[:120]}\n", "muted")))
+                    if rc != 0:
+                        detail = out.strip()[:200] if out.strip() else f"(exit code {rc})"
+                        self._q.put(("log", (f"      {detail}\n", "muted")))
 
         self._q.put(("done_fix", failed == 0))
 
