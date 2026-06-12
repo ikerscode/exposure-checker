@@ -1370,11 +1370,16 @@ def _check_scheduled_tasks_windows(reporter):
         reporter.end()
         return
     for t in suspicious[:10]:
+        tname = t.get("TaskName", "?")
+        tpath = t.get("TaskPath", "\\")
+        safe_name = tname.replace("'", "''")
+        safe_path = tpath.replace("'", "''")
         reporter.finding(
             "REVIEW",
-            f"Third-party task runs as SYSTEM: {t.get('TaskName', '?')}",
-            f"Non-Microsoft task at {t.get('TaskPath','?')} runs with full machine access.",
+            f"Third-party task runs as SYSTEM: {tname}",
+            f"Non-Microsoft task at {tpath} runs with full machine access.",
             "Review in Task Scheduler — disable if not needed.",
+            fix_cmds=[f"Disable-ScheduledTask -TaskName '{safe_name}' -TaskPath '{safe_path}'"],
         )
     reporter.end(f"{len(suspicious)} non-Microsoft SYSTEM task(s) found.")
 
@@ -1518,9 +1523,9 @@ def _check_kernel_windows(reporter):
             if not json.loads(out).get("EnableLUA", 1):
                 issues.append(("HIGH", "UAC (User Account Control) is disabled",
                                "UAC prevents privilege escalation — disabling it gives any process admin rights.",
-                               "Enable via Windows Security or: "
-                               "Set-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion"
-                               "\\Policies\\System' -Name EnableLUA -Value 1"))
+                               "Enable via Windows Security or run the fix command.",
+                               ["Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows"
+                                "\\CurrentVersion\\Policies\\System' -Name EnableLUA -Value 1"]))
         except Exception:
             pass
 
@@ -1529,7 +1534,8 @@ def _check_kernel_windows(reporter):
     if "False" in out:
         issues.append(("MEDIUM", "Secure Boot is disabled",
                        "Secure Boot prevents unauthorized bootloaders and rootkits at boot time.",
-                       "Enable Secure Boot in UEFI/BIOS firmware settings."))
+                       "Enable Secure Boot in UEFI/BIOS firmware settings.",
+                       None))  # requires firmware — cannot automate
 
     # Windows Defender real-time protection
     out, rc = _ps("Get-MpPreference | Select-Object DisableRealtimeMonitoring | ConvertTo-Json")
@@ -1538,7 +1544,8 @@ def _check_kernel_windows(reporter):
             if json.loads(out).get("DisableRealtimeMonitoring"):
                 issues.append(("HIGH", "Windows Defender real-time protection is off",
                                "Real-time protection is the primary on-access malware defence.",
-                               "Enable: Set-MpPreference -DisableRealtimeMonitoring $false"))
+                               "Enable: Set-MpPreference -DisableRealtimeMonitoring $false",
+                               ["Set-MpPreference -DisableRealtimeMonitoring $false"]))
         except Exception:
             pass
 
@@ -1553,8 +1560,9 @@ def _check_kernel_windows(reporter):
                 issues.append(("CRITICAL", "ASLR is explicitly disabled (MoveImages=0)",
                                "Address Space Layout Randomization is a core exploit-mitigation technique. "
                                "Disabling it makes memory-corruption exploits significantly easier.",
-                               "Enable: Set-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\"
-                               "Session Manager\\Memory Management' -Name MoveImages -Value 1"))
+                               "Enable: Set-ItemProperty '...\\Memory Management' -Name MoveImages -Value 1",
+                               ["Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control"
+                                "\\Session Manager\\Memory Management' -Name MoveImages -Value 1"]))
         except ValueError:
             pass
 
@@ -1565,7 +1573,8 @@ def _check_kernel_windows(reporter):
             if "nx" in line.lower() and "alwaysoff" in line.lower():
                 issues.append(("CRITICAL", "Data Execution Prevention (DEP) is disabled",
                                "DEP prevents code execution from data pages, blocking many exploit payloads.",
-                               "Enable: bcdedit /set nx AlwaysOn   (requires reboot)"))
+                               "Enable: bcdedit /set nx AlwaysOn  (requires reboot)",
+                               ["bcdedit /set nx AlwaysOn"]))
                 break
 
     # BitLocker on the system drive
@@ -1578,7 +1587,8 @@ def _check_kernel_windows(reporter):
             if int(out.strip()) == 0:   # 0 = Off, 1 = On
                 issues.append(("HIGH", "BitLocker is not enabled on C:",
                                "Without full-disk encryption, data is readable if the device is lost or stolen.",
-                               "Enable: Enable-BitLocker -MountPoint C: -EncryptionMethod XtsAes256"))
+                               "Enable: Enable-BitLocker -MountPoint C: -EncryptionMethod XtsAes256",
+                               None))  # requires key backup decision — user must run manually
         except ValueError:
             pass
 
@@ -1590,12 +1600,14 @@ def _check_kernel_windows(reporter):
             issues.append(("CRITICAL", "PowerShell execution policy is Bypass",
                            "Bypass allows any script to run without restriction or warning — "
                            "a common initial-access and persistence technique.",
-                           "Set: Set-ExecutionPolicy RemoteSigned -Scope LocalMachine"))
+                           "Set: Set-ExecutionPolicy RemoteSigned -Scope LocalMachine",
+                           ["Set-ExecutionPolicy RemoteSigned -Scope LocalMachine -Force"]))
         elif policy == "unrestricted":
             issues.append(("HIGH", "PowerShell execution policy is Unrestricted",
                            "Unrestricted permits unsigned remote scripts to run, "
                            "making script-based attacks easier.",
-                           "Set: Set-ExecutionPolicy RemoteSigned -Scope LocalMachine"))
+                           "Set: Set-ExecutionPolicy RemoteSigned -Scope LocalMachine",
+                           ["Set-ExecutionPolicy RemoteSigned -Scope LocalMachine -Force"]))
 
     # LSA Protection (RunAsPPL) — prevents LSASS credential dumping (Mimikatz etc.)
     out, rc = _ps(
@@ -1608,8 +1620,9 @@ def _check_kernel_windows(reporter):
                 issues.append(("MEDIUM", "LSA Protection (RunAsPPL) is disabled",
                                "Without LSA Protection, tools like Mimikatz can dump credentials "
                                "directly from LSASS memory.",
-                               "Enable (requires reboot): Set-ItemProperty "
-                               "'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa' -Name RunAsPPL -Value 1"))
+                               "Enable (requires reboot): Set-ItemProperty '...\\Lsa' -Name RunAsPPL -Value 1",
+                               ["Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa'"
+                                " -Name RunAsPPL -Value 1"]))
         except ValueError:
             pass
 
@@ -1621,14 +1634,15 @@ def _check_kernel_windows(reporter):
         issues.append(("MEDIUM", "SMB signing is not required on this server",
                        "Without required SMB signing, NTLM relay attacks can impersonate this host "
                        "to reach other systems on the network.",
-                       "Enable: Set-SmbServerConfiguration -RequireSecuritySignature $true -Force"))
+                       "Enable: Set-SmbServerConfiguration -RequireSecuritySignature $true -Force",
+                       ["Set-SmbServerConfiguration -RequireSecuritySignature $true -Force"]))
 
     if not issues:
         reporter.ok("No Windows kernel/security hardening issues found")
         reporter.end()
         return
-    for sev, label, why, fix in issues:
-        reporter.finding(sev, label, why, fix)
+    for sev, label, why, fix, fix_cmds in issues:
+        reporter.finding(sev, label, why, fix, fix_cmds=fix_cmds)
     reporter.end(f"{len(issues)} issue(s) found.")
 
 
@@ -2560,13 +2574,13 @@ def _check_malware_windows(reporter):
         reporter.finding("HIGH", "Windows Defender real-time protection is off",
                          "Without real-time protection, threats aren't caught on access.",
                          "Enable: Set-MpPreference -DisableRealtimeMonitoring $false",
-                         fix_cmds=["powershell -Command Set-MpPreference -DisableRealtimeMonitoring $false"])
+                         fix_cmds=["Set-MpPreference -DisableRealtimeMonitoring $false"])
     sig_age = status.get("AntivirusSignatureAge", 0) or 0
     if status.get("AntivirusEnabled") and sig_age > 7:
         reporter.finding("MEDIUM", f"Defender signatures are {sig_age} day(s) old",
                          "Outdated signatures miss recent malware.",
                          "Update: Update-MpSignature",
-                         fix_cmds=["powershell -Command Update-MpSignature"])
+                         fix_cmds=["Update-MpSignature"])
     # Active threats only. Get-MpThreatDetection returns *historical* detections
     # too — already-quarantined items were being reported as 'Active threat'.
     out2, rc2 = _ps(
