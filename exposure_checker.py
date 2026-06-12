@@ -98,7 +98,7 @@ def _self_invocation() -> list:
 # ── Risk database ──────────────────────────────────────────────────────────────
 
 # port -> (service, severity, why it matters, how to fix)
-__version__ = "1.0.0"
+__version__ = "1.0.3"
 
 RISKY_PORTS = {
     21:    ("FTP", "HIGH", "File transfer, usually unencrypted - credentials sent in clear text.",

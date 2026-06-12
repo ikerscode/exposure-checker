@@ -761,10 +761,10 @@ def _batch_fix_macos(cmds):
 def _batch_fix_windows(cmds):
     """Single UAC prompt for ALL fixes on Windows.
 
-    The elevated script writes its own output via Add-Content so we avoid
-    shell-level *> redirection inside a -Command string (unreliable with
-    paths containing spaces, and unavailable in PS < 5). Invoked with -File
-    so no quoting gymnastics are needed in the ArgumentList.
+    Each command is wrapped in try/catch with $ErrorActionPreference='Stop'
+    so cmdlet failures are caught. Output is written via Out-File -Encoding
+    ASCII to guarantee no BOM — PS5.1 Add-Content -Encoding UTF8 writes a
+    BOM on new files which breaks marker parsing.
     """
     no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     fd, script_path = tempfile.mkstemp(suffix=".ps1", prefix="ec-fix-")
@@ -772,19 +772,23 @@ def _batch_fix_windows(cmds):
     ps_out = out_path.replace("'", "''")     # PS single-quote escape
     ps_scr = script_path.replace("'", "''")  # PS single-quote escape
 
-    lines = [
-        f"$__f = '{ps_out}'",
-        "$ErrorActionPreference = 'Continue'",
-    ]
+    lines = [f"$__f = '{ps_out}'"]
     for i, cmd in enumerate(cmds):
         lines += [
-            f'"##ECCMD{i}##" | Add-Content -Path $__f -Encoding UTF8',
-            # Capture $? inside the block before the pipeline consumes it
-            (f"& {{ {cmd} 2>&1; $script:__c ="
-             " if ($LASTEXITCODE) { $LASTEXITCODE }"
-             " elseif ($?) { 0 } else { 1 } }"
-             " | Out-String -Stream | Add-Content -Path $__f -Encoding UTF8"),
-            f'"##ECEXIT{i}:$__c##" | Add-Content -Path $__f -Encoding UTF8',
+            f'"##ECCMD{i}##" | Out-File -Append -Encoding ASCII -FilePath $__f',
+            f"$__c = 0",
+            f"try {{",
+            f"    $ErrorActionPreference = 'Stop'",
+            f"    & {{ {cmd} }} 2>&1 | Out-String -Stream"
+            f" | Out-File -Append -Encoding ASCII -FilePath $__f",
+            f"    if ($LASTEXITCODE) {{ $__c = $LASTEXITCODE }}",
+            f"}} catch {{",
+            f"    $ErrorActionPreference = 'Continue'",
+            f'    "Error: $_" | Out-File -Append -Encoding ASCII -FilePath $__f',
+            f"    $__c = 1",
+            f"}}",
+            f"$ErrorActionPreference = 'Continue'",
+            f'"##ECEXIT{i}:$__c##" | Out-File -Append -Encoding ASCII -FilePath $__f',
         ]
     try:
         with os.fdopen(fd, "w", encoding="utf-8-sig") as fh:
@@ -792,7 +796,7 @@ def _batch_fix_windows(cmds):
         runner = (
             f"Start-Process powershell.exe "
             f"-ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','\"{ps_scr}\"' "
-            f"-Verb RunAs -Wait"
+            f"-Verb RunAs -WindowStyle Hidden -Wait"
         )
         r = subprocess.run(
             ["powershell", "-NonInteractive", "-NoProfile", "-Command", runner],
@@ -802,7 +806,7 @@ def _batch_fix_windows(cmds):
         if "denied" in (r.stderr or "").lower() or "cancel" in (r.stderr or "").lower():
             return [(c, 1, "UAC prompt declined") for c in cmds]
         try:
-            with open(out_path, encoding="utf-8", errors="replace") as fh:
+            with open(out_path, encoding="ascii", errors="replace") as fh:
                 stdout = fh.read()
         except OSError:
             stdout = ""
