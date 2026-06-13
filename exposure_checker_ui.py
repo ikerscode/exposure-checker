@@ -89,6 +89,14 @@ _GRADE_LABEL = {
 }
 
 
+def _ago(ts: float) -> str:
+    diff = (datetime.datetime.now() - datetime.datetime.fromtimestamp(ts)).total_seconds()
+    if diff < 120:   return "just now"
+    if diff < 3600:  return f"{int(diff / 60)}m ago"
+    if diff < 86400: return f"{int(diff / 3600)}h ago"
+    return f"{int(diff / 86400)}d ago"
+
+
 # ── TTK dark theme ─────────────────────────────────────────────────────────────
 
 def _configure_style(root):
@@ -669,6 +677,66 @@ def _elevation_available() -> bool:
     return False
 
 
+def _ensure_admin() -> None:
+    """Re-launch the GUI with admin privileges if not already elevated.
+
+    On success the elevated process takes over and this one exits.
+    If the user declines or no elevation tool is available, shows an
+    error dialog and exits.  CLI subcommands bypass this entirely.
+    """
+    if _is_root():
+        return
+
+    if _UI_OS == "Windows":
+        import ctypes
+        if getattr(sys, "frozen", False):
+            exe, params = sys.argv[0], " ".join(f'"{a}"' for a in sys.argv[1:])
+        else:
+            exe    = sys.executable
+            params = " ".join(f'"{a}"' for a in sys.argv)
+        ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, None, 1)
+        if ret > 32:
+            sys.exit(0)
+
+    elif _UI_OS == "Darwin":
+        if getattr(sys, "frozen", False):
+            safe = " ".join(shlex.quote(a) for a in sys.argv)
+        else:
+            safe = shlex.quote(sys.executable) + " " + " ".join(shlex.quote(a) for a in sys.argv)
+        script = f'do shell script "{safe} &" with administrator privileges'
+        r = subprocess.run(["osascript", "-e", script], capture_output=True)
+        if r.returncode == 0:
+            sys.exit(0)
+
+    elif _UI_OS == "Linux":
+        pkexec = shutil.which("pkexec")
+        if pkexec:
+            os.execvp(pkexec, [pkexec] + sys.argv)
+
+    _tmp = tk.Tk()
+    _tmp.withdraw()
+    if _UI_OS == "Windows":
+        how = "Right-click the app → 'Run as administrator'."
+    elif _UI_OS == "Darwin":
+        how = "Launch from a terminal with: sudo exposure-checker-ui"
+    else:
+        how = "Launch with: pkexec exposure-checker-ui  or  sudo exposure-checker-ui"
+    messagebox.showerror(
+        "Administrator Required",
+        "Exposure Checker needs administrator privileges to scan your system.\n\n"
+        + how,
+        parent=_tmp,
+    )
+    _tmp.destroy()
+    sys.exit(1)
+
+
+_FIRST_RUN_FLAG = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+    "exposure-checker", "first_run_done",
+)
+
+
 def _batch_fix_elevated(findings):
     """Collect ALL fix_cmds and run them with a SINGLE elevation prompt.
     Returns list of (cmd, returncode, output) or None if no escalation tool."""
@@ -948,6 +1016,13 @@ class _FindingsPane:
         self._findings: list = []
         self._cards:    list = []
         self._selected: dict = {}   # idx → BooleanVar (unused currently but kept for API)
+        self._parent = parent
+
+        # Alert banner — packed before the scroll canvas when there are C/H findings
+        self._alert_frame   = tk.Frame(parent, bg=C["panel"],
+                                       highlightthickness=1,
+                                       highlightbackground=C["border"])
+        self._alert_visible = False
 
         self._outer = tk.Frame(parent, bg=C["bg"])
         self._outer.pack(fill=tk.BOTH, expand=True)
@@ -1029,6 +1104,7 @@ class _FindingsPane:
         self._set_empty(False)
 
     def clear(self):
+        self.hide_alert()
         for card in self._cards:
             card.destroy()
         self._cards.clear()
@@ -1036,6 +1112,60 @@ class _FindingsPane:
         self._selected.clear()
         self._set_empty(True)
         self._canvas.yview_moveto(0)
+
+    def scroll_to_top(self):
+        self._canvas.yview_moveto(0.0)
+
+    def show_alert(self, finding: dict) -> None:
+        """Pin a plain-English headline card for the worst finding above the list."""
+        sev   = finding.get("severity", "HIGH")
+        col   = self._STRIPE.get(sev, C["HIGH"])
+        label = finding.get("label", "")
+        why   = finding.get("why", "")
+
+        for w in self._alert_frame.winfo_children():
+            w.destroy()
+
+        stripe = tk.Frame(self._alert_frame, bg=col, width=5)
+        stripe.pack(side=tk.LEFT, fill=tk.Y)
+        stripe.pack_propagate(False)
+
+        body = tk.Frame(self._alert_frame, bg=C["panel"])
+        body.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=9)
+
+        top_row = tk.Frame(body, bg=C["panel"])
+        top_row.pack(fill=tk.X)
+        tk.Label(top_row, text=self._SEV_CAP.get(sev, sev),
+                 bg=col, fg="#ffffff",
+                 font=("TkDefaultFont", 7, "bold"),
+                 padx=5, pady=2).pack(side=tk.LEFT, padx=(0, 8))
+        tk.Label(top_row, text=label,
+                 bg=C["panel"], fg=C["text"],
+                 font=("TkDefaultFont", 9, "bold"),
+                 anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        if why:
+            tk.Label(body, text=why,
+                     bg=C["panel"], fg=C["muted"],
+                     font=("TkDefaultFont", 8),
+                     anchor="w", wraplength=520,
+                     justify=tk.LEFT).pack(fill=tk.X, pady=(3, 0))
+
+        if finding.get("fix_cmds") and self._on_fix_one:
+            fix_col = tk.Frame(self._alert_frame, bg=C["panel"])
+            fix_col.pack(side=tk.RIGHT, padx=12)
+            ttk.Button(fix_col, text="Fix it →",
+                       style="Accent.TButton",
+                       command=lambda f=finding: self._on_fix_one(f)).pack(pady=10)
+
+        if not self._alert_visible:
+            self._alert_frame.pack(fill=tk.X, before=self._outer, pady=(0, 6))
+            self._alert_visible = True
+
+    def hide_alert(self) -> None:
+        if self._alert_visible:
+            self._alert_frame.pack_forget()
+            self._alert_visible = False
 
     def get_fixable(self) -> list:
         return [f for f in self._findings
@@ -1553,9 +1683,22 @@ class ScanTab:
             coaching = "Address medium issues to reach A."
         self._coaching_lbl.configure(text=coaching)
 
+        worst = next(
+            (f for sev in ("CRITICAL", "HIGH")
+             for f in self._findings
+             if f.get("severity") == sev and not f.get("_accepted")),
+            None,
+        )
+        if worst:
+            self._pane.show_alert(worst)
+            self._pane.scroll_to_top()
+        else:
+            self._pane.hide_alert()
+
         # Save history + refresh sparkline
         ec.save_scan_history(self._title, score, grade, counts)
         self._sparkline.push(score, grade)
+        self.app._refresh_last_scan_badge()
 
         # Compliance score
         profile = self._compliance_var.get()
@@ -1805,6 +1948,7 @@ class App:
         root.resizable(True, True)
         _configure_style(root)
         self._build()
+        self._refresh_last_scan_badge()
         self._poll()
 
     # ── Build ─────────────────────────────────────────────────────────────────
@@ -2013,6 +2157,12 @@ class App:
             side=tk.LEFT, fill=tk.X, expand=True, pady=7)
         self._progress = ttk.Progressbar(sb, mode="indeterminate", length=90)
         self._progress.pack(side=tk.RIGHT, padx=10, pady=7)
+        tk.Frame(sb, bg=C["border"], width=1).pack(
+            side=tk.RIGHT, fill=tk.Y, pady=5)
+        self._last_scan_lbl = tk.Label(
+            sb, text="", bg=C["panel"], fg=C["muted"],
+            font=("TkDefaultFont", 8), padx=10)
+        self._last_scan_lbl.pack(side=tk.RIGHT, pady=7)
 
     # ── Seagull animation ─────────────────────────────────────────────────────
 
@@ -2123,6 +2273,26 @@ class App:
             f"Session reverted — {ok_n} ok, {fail_n} failed. Rescanning in 3s…"
         )
         self.root.after(3000, self._tab_security.start_scan)
+
+    def _refresh_last_scan_badge(self) -> None:
+        """Update the status-bar 'Last scan' pill from on-disk history."""
+        best_ts, best_grade = 0.0, None
+        for tab_name in ("security", "antivirus", "cleaner"):
+            hist = ec.load_scan_history(tab_name, n=1)
+            if hist and hist[-1]["ts"] > best_ts:
+                best_ts   = hist[-1]["ts"]
+                best_grade = hist[-1]["grade"]
+        if best_grade is None:
+            self._last_scan_lbl.configure(text="No scan yet", fg=C["muted"])
+        else:
+            col = _GRADE_COLOR.get(best_grade, C["muted"])
+            self._last_scan_lbl.configure(
+                text=f"Last scan: {_ago(best_ts)}  ·  {best_grade}",
+                fg=col,
+            )
+            self.root.title(
+                f"Exposure Checker  ·  Grade {best_grade}  ·  Gull"
+            )
 
     def _log_append(self, text: str, tag: str = ""):
         self._log.configure(state=tk.NORMAL)
@@ -2715,6 +2885,66 @@ class VeniceSplash:
             self._root.after(80, lambda: self.wait_done(callback))
 
 
+def _first_run_wizard(root: tk.Tk, app) -> None:
+    """On first launch: ask Quick Scan or Full Audit and kick it off."""
+    if os.path.exists(_FIRST_RUN_FLAG):
+        return
+    try:
+        os.makedirs(os.path.dirname(_FIRST_RUN_FLAG), exist_ok=True)
+        open(_FIRST_RUN_FLAG, "w").close()
+    except Exception:
+        pass
+
+    dlg = tk.Toplevel(root)
+    dlg.title("Welcome to Exposure Checker")
+    dlg.configure(bg=C["bg"])
+    dlg.resizable(False, False)
+    dlg.transient(root)
+    dlg.grab_set()
+
+    dlg.update_idletasks()
+    w, h = 420, 260
+    rx = root.winfo_rootx() + (root.winfo_width()  - w) // 2
+    ry = root.winfo_rooty() + (root.winfo_height() - h) // 2
+    dlg.geometry(f"{w}x{h}+{rx}+{ry}")
+
+    tk.Label(dlg, text="Welcome",
+             bg=C["bg"], fg=C["accent"],
+             font=("TkDefaultFont", 18, "bold")).pack(pady=(28, 4))
+    tk.Label(dlg, text="Choose how to start your first scan:",
+             bg=C["bg"], fg=C["text"],
+             font=("TkDefaultFont", 10)).pack(pady=(0, 22))
+
+    choice = [None]
+
+    def _pick(val):
+        choice[0] = val
+        dlg.destroy()
+
+    btn_f = tk.Frame(dlg, bg=C["bg"])
+    btn_f.pack()
+    ttk.Button(btn_f, text="Quick Scan\nSecurity only  (~30 s)",
+               style="Accent.TButton",
+               command=lambda: _pick("quick")).pack(
+        side=tk.LEFT, padx=14, ipadx=14, ipady=8)
+    ttk.Button(btn_f, text="Full Audit\nSecurity + AV + Cleaner",
+               command=lambda: _pick("full")).pack(
+        side=tk.LEFT, padx=14, ipadx=14, ipady=8)
+
+    tk.Label(dlg, text="You can re-run any scan from its tab at any time.",
+             bg=C["bg"], fg=C["muted"],
+             font=("TkDefaultFont", 8)).pack(pady=(20, 0))
+
+    root.wait_window(dlg)
+
+    if choice[0] == "quick":
+        root.after(150, app._tab_security.start_scan)
+    elif choice[0] == "full":
+        root.after(150, app._tab_security.start_scan)
+        root.after(300, app._tab_antivirus.start_scan)
+        root.after(450, app._tab_cleaner.start_scan)
+
+
 def _show_splash(root):
     splash = VeniceSplash(root)
     return splash
@@ -2733,6 +2963,8 @@ def main():
         ec.main()
         return
 
+    _ensure_admin()
+
     root = tk.Tk()
     root.withdraw()
     # On HiDPI Windows, sync Tk's logical scaling to the real DPI so fonts and
@@ -2746,11 +2978,13 @@ def main():
         except Exception:
             pass
     app_built = [False]
+    app_ref   = [None]
 
     def _show_main():
         if not app_built[0]:
             app_built[0] = True
-            App(root)
+            app_ref[0] = App(root)
+            root.after(200, lambda: _first_run_wizard(root, app_ref[0]))
         root.deiconify()
         root.lift()
 

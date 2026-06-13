@@ -4499,6 +4499,22 @@ COMPLIANCE_PROFILES = [
     "PCI-DSS Lite",
 ]
 
+# CLI slug → internal profile name
+_PROFILE_MAP = {
+    "cis-l1":  "CIS Level 1",
+    "hipaa":   "HIPAA Basics",
+    "pci-dss": "PCI-DSS Lite",
+}
+
+# CLI slug → argparse flags that must be enabled for full coverage
+_PROFILE_CHECKS = {
+    "cis-l1":  ["ssh_audit", "check_firewall", "check_world_writable",
+                 "check_suid", "check_kernel", "check_listeners", "check_packages"],
+    "hipaa":   ["ssh_audit", "check_firewall", "check_auth", "check_packages",
+                 "check_listeners", "check_sensitive_perms"],
+    "pci-dss": ["ssh_audit", "check_firewall", "check_listeners", "check_packages"],
+}
+
 _COMPLIANCE_REQUIRED: dict = {
     "CIS Level 1": {
         "ssh":             "CRITICAL",
@@ -5546,6 +5562,13 @@ def main():
                         type=str.lower,
                         help="Exit with status 1 if any finding is at or above SEVERITY "
                              "(or any NEW finding when used with --diff-baseline).")
+    parser.add_argument("--profile",
+                        choices=list(_PROFILE_MAP),
+                        metavar="PROFILE",
+                        help="Check compliance against a named profile and exit 1 if any "
+                             "required control fails.  Choices: "
+                             + ", ".join(_PROFILE_MAP) + ".  "
+                             "Required checks for the profile are enabled automatically.")
     parser.add_argument("--email", metavar="ADDRESS",
                         help="Email scan summary to ADDRESS after the scan completes. "
                              f"SMTP credentials must be set in {_SMTP_CONFIG_PATH}.")
@@ -5559,6 +5582,13 @@ def main():
                         help="Diff this scan against the saved baseline and show changes.")
 
     args = parser.parse_args()
+
+    # Auto-enable required checks for the chosen compliance profile
+    if args.profile:
+        for flag in _PROFILE_CHECKS.get(args.profile, []):
+            if not getattr(args, flag, False):
+                setattr(args, flag, True)
+
     reporter = _Reporter(json_mode=args.json)
 
     if not args.json:
@@ -5566,6 +5596,32 @@ def main():
         print("  EXPOSURE CHECKER")
         print("  !  Only scan systems you own or are authorised to test.")
         print("=" * 66)
+
+    if sys.platform == "win32":
+        try:
+            import ctypes as _ctypes
+            _is_admin = bool(_ctypes.windll.shell32.IsUserAnAdmin())
+        except Exception:
+            _is_admin = False
+    else:
+        _is_admin = (os.geteuid() == 0)
+
+    if not _is_admin:
+        msg = (
+            "[!] Administrator privileges required for a complete scan.\n"
+            "    Some checks (auth log, kernel params, file permissions) will\n"
+            "    be skipped or return incomplete results without them.\n"
+        )
+        if sys.platform == "win32":
+            msg += "    Re-run in an elevated (Administrator) terminal."
+        else:
+            msg += f"    Re-run with: sudo {' '.join(sys.argv)}"
+        if args.json:
+            import json as _json
+            print(_json.dumps({"error": "administrator_required", "detail": msg.strip()}))
+        else:
+            print(msg, file=sys.stderr)
+        sys.exit(1)
 
     if not args.ssh_audit_only:
         ip, display = resolve_target(args.target)
@@ -5636,6 +5692,42 @@ def main():
         summary = "  " + " · ".join(parts) if parts else "  No findings"
         print(f"\n  Risk Score  {score}/100  [{bar}]  Grade: {grade}")
         print(summary)
+
+    _profile_failed = False
+    if args.profile:
+        profile_name = _PROFILE_MAP[args.profile]
+        required     = _COMPLIANCE_REQUIRED.get(profile_name, {})
+        sev_rank     = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "REVIEW": 1, "INFO": 0}
+        all_findings = [f for chk in reporter._data.get("checks", [])
+                        for f in chk.get("findings", [])]
+        failing: dict = {}
+        for f in all_findings:
+            chk_name = f.get("check", "").lower()
+            sev      = f.get("severity", "INFO")
+            for req_key, min_sev in required.items():
+                if (req_key in chk_name
+                        and sev_rank.get(sev, 0) >= sev_rank.get(min_sev, 0)
+                        and req_key not in failing):
+                    failing[req_key] = f.get("label", sev)
+        n_pass  = len(required) - len(failing)
+        n_total = len(required)
+        pct     = int(100 * n_pass / n_total) if n_total else 100
+        result  = "PASS" if pct == 100 else "FAIL"
+        reporter._data["compliance"] = {
+            "profile": profile_name, "passing": n_pass,
+            "total": n_total, "pct": pct, "result": result,
+            "failing": failing,
+        }
+        if not args.json:
+            col_w = max((len(k) for k in required), default=10) + 2
+            bar_p = "█" * (pct // 5) + "░" * (20 - pct // 5)
+            print(f"\n  ─── {profile_name} " + "─" * max(0, 44 - len(profile_name)))
+            for key, min_sev in required.items():
+                status = "FAIL" if key in failing else "PASS"
+                detail = f"  ← {failing[key]}" if key in failing else ""
+                print(f"  {key:<{col_w}} {status}{detail}")
+            print(f"\n  Compliance  {n_pass}/{n_total}  [{bar_p}]  {pct}%  {result}")
+        _profile_failed = pct < 100
 
     if args.output:
         err = reporter.write_to(args.output)
@@ -5725,6 +5817,15 @@ def main():
             )
         elif not args.json:
             print(f"\n[*] Baseline saved to {args.baseline_file}")
+
+    if _profile_failed:
+        if not args.json:
+            n_fail = len(reporter._data.get("compliance", {}).get("failing", {}))
+            print(
+                f"\n[!] --profile {args.profile}: "
+                f"{n_fail} required control(s) failing."
+            )
+        sys.exit(1)
 
 
 if __name__ == "__main__":

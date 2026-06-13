@@ -1,67 +1,136 @@
 # Exposure Checker
 
 A self-hosted **security, antivirus, and cleanup** tool for machines you own.
-Three things in one app:
+No cloud, no telemetry, no accounts — everything stays on your machine.
 
-- **Protect** — finds risky open ports, weak configs, brute-force attempts,
-  outdated packages, and malware indicators, then drives your OS's *own* defenses
-  (Windows Defender / macOS XProtect + Gatekeeper / ClamAV; Windows Firewall / pf
-  / macOS application firewall) and tells you exactly how to fix each finding.
-- **Clean** — reclaims disk space CCleaner-style: browser and package-manager
-  caches, system temp/log bloat, old kernels, crash dumps, Xcode/iOS debris,
-  Recycle Bin, and a **startup-programs audit** (the biggest lever for "my
-  machine got slower / I want more FPS").
+- **Protect** — finds risky open ports, weak configs, brute-force attempts, outdated packages,
+  and malware indicators, then drives your OS's *own* defenses (Windows Defender /
+  macOS XProtect + Gatekeeper / ClamAV; Windows Firewall / pf / macOS application firewall)
+  and tells you exactly how to fix each finding.
+- **Clean** — reclaims disk space CCleaner-style: browser and package-manager caches,
+  system temp/log bloat, old kernels, crash dumps, Xcode/iOS debris, Recycle Bin,
+  and a **startup-programs audit** (the biggest lever for "my machine got slower").
 - **Track** — risk score and letter grade, history trend, baselines, diffs,
   scheduled scans, and HTML/PDF reports.
 
-Runs on **Linux, macOS, and Windows**. No cloud, no telemetry, no accounts —
-everything stays on your machine.
-
-> **Honest architecture:** this is an *orchestrator*, not a from-scratch AV.
-> A resident antivirus engine and packet-filtering firewall can't (and
-> shouldn't) be reimplemented in Python — they'd be slower and weaker than what
-> ships with your OS. Exposure Checker drives the native engines and layers
-> heuristics + plain-language remediation on top. 100% local.
-
-> **Only scan systems you own or have written permission to test.**
+Runs on **Linux, macOS, and Windows**.
 
 ---
 
 ## Download
 
-Pre-built desktop app — no Python required:
+Pre-built desktop app — **no Python, no terminal required:**
 
-| Platform | Download |
-|---|---|
-| macOS | `exposure-checker-macos.dmg` — open DMG → drag to Applications |
-| Windows | `Exposure Checker.exe` — run as Administrator for full results |
-| Linux | `exposure-checker-linux` — `chmod +x` then run |
+| Platform | File | Steps |
+|---|---|---|
+| **Windows** | `Exposure Checker.exe` | Right-click → **Run as administrator** |
+| **macOS** | `exposure-checker-macos.dmg` | Open DMG → drag to Applications → right-click → Open |
+| **Linux** | `exposure-checker-linux` | `chmod +x exposure-checker-linux && sudo ./exposure-checker-linux` |
 
-Go to the [Releases page](../../releases/latest) to download.
+→ **[Download the latest release](../../releases/latest)**
+
+> The app requires administrator / root access so it can read system logs,
+> firewall state, and kernel parameters. It will prompt you for this on launch.
 
 ---
 
-## Install from source
+## Quick start
 
-**Linux / macOS** (Python 3.9+ required):
+1. **Download and launch** the app for your platform (see above).
+2. On first launch a **Welcome dialog** appears — choose **Quick Scan** (security only,
+   ~30 s) or **Full Audit** (security + antivirus + cleaner).
+3. The scan runs automatically. When it finishes:
+   - The **risk score and letter grade** (A–F) appear on the left.
+   - If anything critical is found, a **red alert card** pins to the top of the findings
+     list with a one-click **Fix it →** button.
+   - The **"Last scan"** badge in the status bar updates so you always know when
+     you last checked.
+4. Hit **Fix all issues** to apply every available fix in a single elevation prompt —
+   one UAC dialog on Windows, one password prompt on macOS/Linux.
+
+---
+
+## Risk score
+
+Every scan produces a score out of 100 and a letter grade:
+
+| Grade | Score | Meaning |
+|---|---|---|
+| A | 90–100 | Excellent posture |
+| B | 75–89 | Minor issues to address |
+| C | 50–74 | Needs attention |
+| D | 25–49 | Significant exposure |
+| F | 0–24 | Critical risk |
+
+---
+
+## Desktop UI features
+
+- Venice canal flythrough splash + animated seagull mascot throughout
+- Animated radar/score ring with grade, plus scan-history trend sparkline
+- Real-time findings cards with severity filtering and **one-click remediation**
+  (single elevation prompt per batch — one UAC dialog on Windows, one password dialog on macOS)
+- **Three scan tabs:** Security · Antivirus · Cleaner
+- HTML and PDF report export
+- Accepted risks — suppress known-safe findings permanently
+- Snapshot and restore — capture and revert system config state
+- Compliance profiles — CIS Level 1, HIPAA Basics, PCI-DSS Lite
+- Scheduled scans with desktop notifications
+
+---
+
+## Command-line interface
+
+Install from source first (see below), then:
 
 ```bash
-git clone https://github.com/ikerscode/exposure-checker
-cd exposure-checker
-bash install.sh
+# Full audit — all local checks
+sudo exposure-checker --full-audit
+
+# Specific checks
+sudo exposure-checker --ssh-audit --check-firewall --check-packages
+
+# Compliance profiles — auto-enables required checks, exits 1 on failure
+sudo exposure-checker --profile cis-l1
+sudo exposure-checker --profile hipaa
+sudo exposure-checker --profile pci-dss
+
+# Save a report
+sudo exposure-checker --full-audit --output report.html   # self-contained HTML
+sudo exposure-checker --full-audit --output report.json   # machine-readable
+
+# CI gate — exit 1 if any HIGH or CRITICAL finding
+sudo exposure-checker --full-audit --fail-on high
+
+# Baseline and drift detection
+sudo exposure-checker --full-audit --save-baseline
+sudo exposure-checker --full-audit --diff-baseline --fail-on high
+
+# Apply fixes from a saved report
+sudo exposure-checker remediate report.json --all --yes
+
+# Scheduled weekly scan with email
+exposure-checker schedule install --email you@example.com
 ```
 
-**Windows** (Python 3.9+ required — [python.org](https://www.python.org/downloads/)):
+### Compliance profiles
 
-```powershell
-# In an elevated (Administrator) PowerShell
-git clone https://github.com/ikerscode/exposure-checker
-cd exposure-checker
-Set-ExecutionPolicy Bypass -Scope Process -Force
-.\install.ps1
+`--profile` auto-enables the checks required for the chosen standard and prints a per-control pass/fail table:
+
+```
+  ─── CIS Level 1 ─────────────────────────────────────────────
+  ssh              PASS
+  firewall         FAIL  ← Firewall disabled
+  world-writable   PASS
+  suid             PASS
+  kernel           FAIL  ← kernel.randomize_va_space = 0
+  listeners        PASS
+  packages         PASS
+
+  Compliance  5/7  [████████████░░░░░░░░]  71%  FAIL
 ```
 
-One pip dependency: `cryptography` (TLS checks only). Everything else is Python stdlib.
+Exits 0 on full compliance, 1 on any failure — composable with CI.
 
 ---
 
@@ -88,133 +157,29 @@ One pip dependency: `cryptography` (TLS checks only). Everything else is Python 
 | TLS certificate | `--tls-check HOST` | ✓ | ✓ | ✓ |
 | Container CVEs | `--trivy-scan` | Trivy (if installed) | Trivy (if installed) | Trivy (if installed) |
 
-Run everything at once:
-
-```bash
-exposure-checker --full-audit          # security + antivirus + startup audit
-```
-
-Cleanup is opt-in (it only ever *reports* reclaimable space; nothing is deleted
-without you running the fix):
-
-```bash
-exposure-checker --check-cleaner       # CCleaner-style disk reclaim report
-exposure-checker --check-startup       # what launches at boot/login
-```
-
 ---
 
-## Output formats
+## Install from source
+
+**Linux / macOS** (Python 3.9+ required):
 
 ```bash
-# Human-readable (default)
-exposure-checker --full-audit
-
-# Self-contained HTML report — risk score, severity charts, fix commands
-exposure-checker --full-audit --output report.html
-
-# Machine-readable JSON
-exposure-checker --full-audit --output report.json
-
-# Exit 1 if any HIGH or CRITICAL finding (useful in CI)
-exposure-checker --full-audit --fail-on high
+git clone https://github.com/ikerscode/exposure-checker
+cd exposure-checker
+bash install.sh
 ```
 
----
+**Windows** (Python 3.9+ required — [python.org](https://www.python.org/downloads/)):
 
-## Risk score
-
-Every scan produces a score out of 100 and a letter grade:
-
-| Grade | Score | Meaning |
-|---|---|---|
-| A | 90–100 | Excellent posture |
-| B | 75–89 | Minor issues to address |
-| C | 50–74 | Needs attention |
-| D | 25–49 | Significant exposure |
-| F | 0–24 | Critical risk |
-
----
-
-## Remediation
-
-Every finding ships with a specific fix command. Run them automatically:
-
-```bash
-# Interactive — review and approve each fix
-exposure-checker remediate report.json
-
-# Apply everything at once
-exposure-checker remediate report.json --all --yes
-
-# Dry run — show what would be executed
-exposure-checker remediate report.json --dry-run
+```powershell
+# In an elevated (Administrator) PowerShell
+git clone https://github.com/ikerscode/exposure-checker
+cd exposure-checker
+Set-ExecutionPolicy Bypass -Scope Process -Force
+.\install.ps1
 ```
 
----
-
-## Baseline and diff
-
-Track what changes between scans:
-
-```bash
-# Save current state as baseline
-exposure-checker --full-audit --save-baseline
-
-# Later — show only what changed
-exposure-checker --full-audit --diff-baseline
-
-# Compare two saved reports
-exposure-checker diff before.json after.json
-
-# Exit 1 in CI if any new HIGH+ findings appear
-exposure-checker --full-audit --diff-baseline --fail-on high
-```
-
----
-
-## Scheduled scans
-
-Install a recurring scan with optional email notification:
-
-```bash
-exposure-checker schedule install --email you@example.com
-exposure-checker schedule status
-exposure-checker schedule remove
-```
-
-Uses cron (Linux/macOS) or Task Scheduler (Windows).
-SMTP credentials go in `~/.config/exposure-checker/config.ini` (chmod 600, never committed).
-
----
-
-## Desktop UI
-
-```bash
-exposure-checker-ui
-```
-
-Dark-theme desktop app with:
-
-- A **Venice canal flythrough** splash (third-person camera trailing a seagull
-  down the canals at dusk) and the seagull mascot throughout
-- Animated radar/score ring with letter grade, plus a scan-history trend chart
-- Real-time findings cards with severity filtering and one-click remediation
-  (a **single** elevation prompt per batch — one UAC dialog on Windows, one
-  password dialog on macOS, not one per fix)
-- **Three scan tabs:**
-  - **Security** — ports, SSH, firewall, listeners, kernel, perms, accounts, …
-  - **Antivirus** — drives Defender (third-party-AV aware, so Norton/Bitdefender
-    users don't get false "Defender disabled" criticals) / XProtect + Gatekeeper
-    + launchd persistence / ClamAV, with heuristic indicators
-  - **Cleaner** — reclaimable disk space + the startup-programs audit
-- HTML and PDF report export (opens correctly on all platforms)
-- Accepted risks — suppress known-safe findings
-- Snapshot and restore — capture and revert system config state
-- Compliance profiles — CIS Level 1, HIPAA Basics, PCI-DSS Lite
-- Scheduled scans with desktop notifications (frozen-app safe — the scheduler
-  re-launches the binary correctly, not a vanished temp path)
-- Crisp on HiDPI/scaled Windows displays; trackpad scrolling works on macOS
+One pip dependency: `cryptography` (TLS checks only). Everything else is Python stdlib.
 
 ---
 
@@ -246,3 +211,4 @@ and attaches them to the release automatically.
 - All subprocess calls use argument lists, never shell string concatenation.
 - Validates scan targets before connecting; defaults to `127.0.0.1`.
 - Scan reports are gitignored — they reveal your weak spots.
+- Requires administrator/root: the app will prompt you on launch and exit if access is denied.
