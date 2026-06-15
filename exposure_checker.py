@@ -6360,13 +6360,13 @@ def check_system_resources(reporter):
     # ── VPN detection ──────────────────────────────────────────────────────────
     try:
         if _OS == "Windows":
-            out = _ps(
+            out, rc = _ps(
                 "(Get-NetAdapter | Where-Object {"
                 " $_.InterfaceDescription -match 'VPN|Tunnel|WireGuard|OpenVPN|Nord|Express|Proton'"
                 " -or $_.Name -match 'VPN|Tunnel|WireGuard|tun|tap'"
                 " } | Where-Object { $_.Status -eq 'Up' } | Measure-Object).Count"
             )
-            vpn_up = out.strip() not in ("", "0")
+            vpn_up = rc == 0 and out.strip() not in ("", "0")
         elif _OS == "Darwin":
             r = subprocess.run(
                 ["networksetup", "-listallnetworkservices"],
@@ -6447,7 +6447,7 @@ def check_system_resources(reporter):
     try:
         if _OS == "Windows":
             # Report all fixed drives above 90 % full
-            out = _ps(
+            out, rc = _ps(
                 "Get-PSDrive -PSProvider FileSystem | Where-Object {"
                 " $_.Used -and ($_.Used / ($_.Used + $_.Free)) -gt 0.90"
                 " } | ForEach-Object {"
@@ -6455,7 +6455,7 @@ def check_system_resources(reporter):
                 " \"$($_.Root) $pct%\""
                 " }"
             )
-            drives = [ln.strip() for ln in out.splitlines() if ln.strip()]
+            drives = [ln.strip() for ln in out.splitlines() if ln.strip()] if rc == 0 else []
         elif _OS == "Darwin":
             r = subprocess.run(
                 ["df", "-H", "/"],
@@ -6501,13 +6501,13 @@ def check_system_resources(reporter):
     # ── Background CPU hogs ────────────────────────────────────────────────────
     try:
         if _OS == "Windows":
-            out = _ps(
+            out, rc = _ps(
                 "Get-Process | Where-Object { $_.CPU -and $_.Name -notmatch "
                 "'Idle|System|Registry|svchost|csrss|lsass|winlogon|smss|wininit|fontdrvhost' }"
                 " | Sort-Object CPU -Descending | Select-Object -First 5"
                 " | ForEach-Object { \"$($_.Name) [$([int]($_.CPU))s CPU]\" }"
             )
-            hogs = [ln.strip() for ln in out.splitlines() if ln.strip()]
+            hogs = [ln.strip() for ln in out.splitlines() if ln.strip()] if rc == 0 else []
             # Filter to processes with meaningful CPU (heuristic: >8% would need
             # per-core sampling; we report top-5 by cumulative CPU seconds instead)
             if len(hogs) >= 3:
