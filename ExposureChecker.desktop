@@ -2,7 +2,7 @@
 Version=1.0.6
 Name=Exposure Checker
 Comment=Scan · Optimize · Protect · Clean
-Exec=bash -c 'cd "%k" && cd .. && python3 exposure_checker_ui.py'
+Exec=bash -c 'python3 "$(dirname "$(realpath "%k")")/exposure_checker_ui.py"'
 Icon=utilities-system-monitor
 Terminal=false
 Type=Application
