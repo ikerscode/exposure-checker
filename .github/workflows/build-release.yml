@@ -1,13 +1,13 @@
 # Builds the desktop app for all three platforms and publishes a GitHub Release.
 #
 # Trigger: push a version tag, e.g.
-#   git tag v1.0.0
-#   git push origin v1.0.0
+#   git tag v1.0.7
+#   git push origin v1.0.7
 #
 # The release will contain:
-#   exposure-checker-macos.dmg      (drag-to-Applications installer)
-#   Exposure Checker.exe            (Windows standalone)
-#   exposure-checker-linux          (Linux standalone binary)
+#   gullwing-macos.dmg        (drag-to-Applications installer)
+#   Gullwing.exe              (Windows standalone)
+#   gullwing-linux            (Linux standalone binary)
 
 name: Build & Release
 
@@ -47,20 +47,23 @@ jobs:
       - name: Install build dependencies
         run: pip install pyinstaller cryptography
 
-      - name: Build app
-        run: pyinstaller exposure_checker.spec
+      - name: Install package
+        run: pip install -e .
 
-      # ── macOS: codesign (skipped — no cert) then wrap in .dmg ────────────────
+      - name: Build app
+        run: pyinstaller gullwing.spec
+
+      # ── macOS: wrap in .dmg ───────────────────────────────────────────────────
       - name: Package macOS .dmg
         if: runner.os == 'macOS'
         run: |
           mkdir -p dist/dmg
-          cp -r "dist/Exposure Checker.app" dist/dmg/
+          cp -r "dist/Gullwing.app" dist/dmg/
           hdiutil create \
-            -volname "Exposure Checker" \
+            -volname "Gullwing" \
             -srcfolder dist/dmg \
             -ov -format UDZO \
-            "dist/exposure-checker-macos.dmg"
+            "dist/gullwing-macos.dmg"
 
       # ── Upload per-platform artifact ──────────────────────────────────────────
       - name: Upload macOS artifact
@@ -68,21 +71,21 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-dmg
-          path: dist/exposure-checker-macos.dmg
+          path: dist/gullwing-macos.dmg
 
       - name: Upload Windows artifact
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: windows-exe
-          path: "dist/Exposure Checker.exe"
+          path: "dist/Gullwing.exe"
 
       - name: Upload Linux artifact
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: linux-bin
-          path: dist/exposure-checker
+          path: dist/Gullwing
 
   # ── Combine all artifacts into one GitHub Release ────────────────────────────
   release:
@@ -96,26 +99,28 @@ jobs:
         with:
           path: artifacts
 
-      - name: Make Linux binary executable
-        run: chmod +x artifacts/linux-bin/exposure-checker
+      - name: Rename Linux binary
+        run: |
+          mv artifacts/linux-bin/Gullwing artifacts/linux-bin/gullwing-linux
+          chmod +x artifacts/linux-bin/gullwing-linux
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Exposure Checker ${{ github.ref_name }}"
+          name: "Gullwing ${{ github.ref_name }}"
           body: |
             ## Download
 
             | Platform | File | Notes |
             |---|---|---|
-            | macOS | `exposure-checker-macos.dmg` | Open DMG → drag app to Applications |
-            | Windows | `Exposure Checker.exe` | Run as Administrator for full results |
-            | Linux | `exposure-checker-linux` | `chmod +x` then run |
+            | macOS | `gullwing-macos.dmg` | Open DMG → drag app to Applications |
+            | Windows | `Gullwing.exe` | Run as Administrator for full results |
+            | Linux | `gullwing-linux` | `chmod +x` then run |
 
             ## What's new
             <!-- fill in release notes here -->
           files: |
-            artifacts/macos-dmg/exposure-checker-macos.dmg
-            artifacts/windows-exe/Exposure Checker.exe
-            artifacts/linux-bin/exposure-checker
+            artifacts/macos-dmg/gullwing-macos.dmg
+            artifacts/windows-exe/Gullwing.exe
+            artifacts/linux-bin/gullwing-linux
           fail_on_unmatched_files: true
