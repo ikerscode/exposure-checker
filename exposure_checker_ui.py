@@ -2407,7 +2407,9 @@ class App:
                 top = tk.Toplevel(self.root)
                 top.overrideredirect(True)
                 top.configure(bg=self._GULL_TRANS)
-                top.attributes("-topmost", True)
+                # Do NOT set -topmost: that makes gulls float over every other
+                # app on the screen.  As a child of self.root, this Toplevel
+                # already stacks above the app window naturally.
                 try:
                     if _UI_OS == "Windows":
                         top.attributes("-transparentcolor", self._GULL_TRANS)
@@ -2434,6 +2436,18 @@ class App:
 
                 def _tick():
                     try:
+                        # Hide when app is minimised so gulls don't linger
+                        # on the taskbar / desktop.
+                        try:
+                            if self.root.state() == "iconic":
+                                top.withdraw()
+                                self.root.after(200, _tick)
+                                return
+                            else:
+                                top.deiconify()
+                        except Exception:
+                            pass
+
                         state["x"] += speed if ltr else -speed
                         # Realistic wing beat: ~3 Hz asymmetric sine
                         state["flap_t"] = (state["flap_t"] + 0.22) % (2 * math.pi)

