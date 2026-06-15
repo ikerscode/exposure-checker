@@ -7,7 +7,8 @@ Tests for the features added in the v1.0 hardening pass:
   - Windows Defender third-party-AV awareness (false-positive fix)
   - active-vs-historical threat reporting
   - cross-platform browser / dev cache discovery
-  - Startup-programs audit (Linux autostart)
+  - Startup-programs optimizer (Linux autostart)
+  - Gamer helper functions for local power/GPU/protection checks
   - macOS launchd persistence + Gatekeeper checks
   - macOS firewall globalstate (root-free) detection
 
@@ -256,20 +257,48 @@ class TestStartupAudit:
         cfg = tmp_path / "config"
         autostart = cfg / "autostart"
         autostart.mkdir(parents=True)
-        (autostart / "dropbox.desktop").write_text("[Desktop Entry]\nName=Dropbox\n")
-        (autostart / "spotify.desktop").write_text("[Desktop Entry]\nName=Spotify\n")
+        (autostart / "dropbox.desktop").write_text(
+            "[Desktop Entry]\nName=Dropbox\nExec=dropbox start\n")
+        (autostart / "spotify.desktop").write_text(
+            "[Desktop Entry]\nName=Spotify\nExec=spotify --autostart\n")
         monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg))
+        monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "system-config"))
         r = FakeReporter()
         ec._check_startup_linux(r)
-        assert r.findings
-        assert "2 autostart" in r.findings[0]["label"]
+        assert len(r.findings) == 2
+        assert any("Dropbox" in f["label"] for f in r.findings)
+        assert all(f.get("fix_cmds") for f in r.findings)
 
     def test_linux_no_autostart_is_ok(self, tmp_path, monkeypatch):
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty"))
+        monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "system-config"))
         r = FakeReporter()
         ec._check_startup_linux(r)
         assert not r.findings
         assert r.oks
+
+    def test_linux_hidden_autostart_is_ignored(self, tmp_path, monkeypatch):
+        cfg = tmp_path / "config"
+        autostart = cfg / "autostart"
+        autostart.mkdir(parents=True)
+        (autostart / "muted.desktop").write_text(
+            "[Desktop Entry]\nName=Muted\nHidden=true\n")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg))
+        monkeypatch.setenv("XDG_CONFIG_DIRS", str(tmp_path / "system-config"))
+        r = FakeReporter()
+        ec._check_startup_linux(r)
+        assert not r.findings
+        assert r.oks
+
+
+class TestGamerHelpers:
+    def test_json_array_wraps_single_object(self):
+        assert ec._json_array('{"Name": "GPU"}') == [{"Name": "GPU"}]
+
+    def test_mp_disabled_values(self):
+        assert ec._mp_value_disabled(0)
+        assert ec._mp_value_disabled("Disabled")
+        assert not ec._mp_value_disabled(1)
 
 
 # ── macOS launchd persistence + Gatekeeper ──────────────────────────────────────

@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import webbrowser
 
 _UI_OS = platform.system()  # "Linux" | "Darwin" | "Windows"
@@ -54,34 +55,36 @@ _enable_windows_dpi_awareness()
 # ── Palette ────────────────────────────────────────────────────────────────────
 
 C = {
-    "bg":         "#0a0e14",   # deeper, more premium than #0d1117
-    "panel":      "#131920",
-    "input":      "#1c2430",
-    "border":     "#252d3a",
-    "text":       "#e8edf4",
-    "muted":      "#6b7786",
-    "accent":     "#00b4d8",   # ocean cyan — not GitHub blue
-    "accent2":    "#0077a8",   # darker accent for pressed states
-    "CRITICAL":   "#f25757",
-    "HIGH":       "#f5922e",
-    "MEDIUM":     "#e8c13a",
-    "REVIEW":     "#6b7786",
-    "INFO":       "#3d4a5c",
-    "ok":         "#34c96a",
-    "err":        "#f25757",
-    "cmd":        "#60b8d4",
-    "hdr":        "#b892f5",
-    "log_bg":     "#060a0f",
-    "radar_bg":   "#05100d",
-    "radar_grid": "#0b2419",
-    "hdr_bg":     "#0b1018",   # flat header — all header children match this
-    "pill":       "#16202c",   # subtle badge background
+    "bg":         "#080c12",   # deep space black
+    "panel":      "#0e1620",   # elevated surface
+    "input":      "#162030",
+    "border":     "#1e2d3d",
+    "text":       "#edf2fa",   # clean white-blue text
+    "muted":      "#5a6a7a",
+    "accent":     "#00d4ff",   # electric cyan
+    "accent2":    "#0096cc",   # deeper cyan for pressed
+    "neon":       "#9d6cff",   # electric purple for easter eggs / specials
+    "CRITICAL":   "#ff4455",
+    "HIGH":       "#ff8822",
+    "MEDIUM":     "#ffcc00",
+    "REVIEW":     "#5a7088",
+    "INFO":       "#2a3d52",
+    "ok":         "#00e87a",   # neon green
+    "err":        "#ff4455",
+    "cmd":        "#00d4ff",
+    "hdr":        "#cc88ff",   # vivid purple for section headers
+    "log_bg":     "#04080f",
+    "radar_bg":   "#030e0b",
+    "radar_grid": "#081d15",
+    "hdr_bg":     "#080c12",   # header matches deep bg
+    "pill":       "#10182a",   # badge background
+    "scan_glow":  "#00d4ff",   # used for pulse on scan button
 }
 
 _SEV_ORDER   = ["CRITICAL", "HIGH", "MEDIUM", "REVIEW", "INFO"]
 _GRADE_COLOR = {
-    "A": "#34c96a", "B": "#00b4d8",
-    "C": "#e8c13a", "D": "#f5922e", "F": "#f25757", "—": "#6b7786",
+    "A": "#00e87a", "B": "#00d4ff",
+    "C": "#ffcc00", "D": "#ff8822", "F": "#ff4455", "—": "#5a6a7a",
 }
 _GRADE_LABEL = {
     "A": "EXCELLENT", "B": "GOOD",
@@ -172,7 +175,7 @@ def _configure_style(root):
 
     s.configure("TNotebook", background=bg, tabmargins=(0, 4, 0, 0))
     s.configure("TNotebook.Tab", background=panel, foreground=muted,
-                 padding=(20, 9), font=("TkDefaultFont", 10, "bold"))
+                 padding=(14, 9), font=("TkDefaultFont", 10, "bold"))
     s.map("TNotebook.Tab",
           background=[("selected", bg)],
           foreground=[("selected", text)])
@@ -711,7 +714,8 @@ def _ensure_admin() -> None:
     elif _UI_OS == "Linux":
         pkexec = shutil.which("pkexec")
         if pkexec:
-            os.execvp(pkexec, [pkexec] + sys.argv)
+            # sys.argv[0] is the .py filename, not an executable — must prefix python3
+            os.execvp(pkexec, [pkexec, sys.executable] + sys.argv)
 
     _tmp = tk.Tk()
     _tmp.withdraw()
@@ -1359,7 +1363,10 @@ class _FindingsPane:
 
 # ── ScanTab ────────────────────────────────────────────────────────────────────
 
-_TAB_ICONS = {"Security": "◈", "Antivirus": "⊛", "Cleaner": "⊙"}
+_TAB_ICONS = {
+    "Security": "◈", "Antivirus": "⊛", "Performance": "◉",
+    "Protection": "◇", "Cleaner": "⊙",
+}
 
 
 class ScanTab:
@@ -1958,64 +1965,118 @@ class App:
         self._tracker = _SessionTracker()
 
         # ── Header ────────────────────────────────────────────────────────────
-        HDR_H = 64
+        HDR_H = 68
         _HB = C["hdr_bg"]
         hdr_canvas = tk.Canvas(r, height=HDR_H, bg=_HB,
                                 highlightthickness=0)
         hdr_canvas.pack(fill=tk.X)
+        self._hdr_pulse = 0.0   # for animated bottom accent bar
 
         def _paint_hdr(event=None):
             w = hdr_canvas.winfo_width()
             if w < 2:
                 return
             hdr_canvas.delete("bg")
-            # Flat premium fill — keeps every embedded sub-canvas (logo, gull)
-            # perfectly seamless instead of boxed against a gradient.
+            # Base fill
             hdr_canvas.create_rectangle(0, 0, w, HDR_H,
                 fill=_HB, outline="", tags="bg")
-            # Soft cyan glow in the far-right corner (away from the mascot)
-            for gi, k in enumerate((0.05, 0.035, 0.02)):
-                rr = int(0x0b + (0x00 - 0x0b) * 0)   # keep hue; brighten toward accent
-                gg = int(0x10 + 0x40 * k * 4)
-                bb = int(0x18 + 0x60 * k * 4)
-                pad = 60 + gi * 50
-                hdr_canvas.create_oval(w - pad, HDR_H - pad // 2,
-                                       w + pad // 2, HDR_H + pad,
-                                       fill=f"#{min(rr,255):02x}{min(gg,255):02x}{min(bb,255):02x}",
-                                       outline="", tags="bg")
-            # Accent line at bottom
-            hdr_canvas.create_rectangle(0, HDR_H - 2, w, HDR_H,
+
+            # Subtle dot-grid pattern across header — gives depth without noise
+            dot_spacing = 22
+            for gx in range(0, w + dot_spacing, dot_spacing):
+                for gy in range(0, HDR_H + dot_spacing, dot_spacing):
+                    hdr_canvas.create_rectangle(
+                        gx, gy, gx + 1, gy + 1,
+                        fill="#141e2c", outline="", tags="bg"
+                    )
+
+            # Multi-layer radial glow: cyan (right) + subtle purple (centre-left)
+            for gi, (cx_off, rad_mult, r_hex, g_hex, b_hex) in enumerate((
+                (0,     1.0, 0x00, 0x80, 0xaa),   # cyan right glow
+                (-0.4,  0.6, 0x40, 0x18, 0x60),   # purple centre glow
+            )):
+                for k in (0.06, 0.040, 0.022):
+                    pad = int((60 + gi * 40) * rad_mult)
+                    rr = min(int(r_hex * k * 6), 40)
+                    gg = min(int(g_hex * k * 6), 0xd0)
+                    bb = min(int(b_hex * k * 6), 0xff)
+                    ox = int(w * (0.82 + cx_off))
+                    hdr_canvas.create_oval(
+                        ox - pad, HDR_H - pad // 2,
+                        ox + pad // 2, HDR_H + pad,
+                        fill=f"#{rr:02x}{gg:02x}{bb:02x}",
+                        outline="", tags="bg"
+                    )
+
+            # Animated pulsing bottom accent bar (two-segment: cyan + purple)
+            pulse = 0.5 + 0.5 * math.sin(self._hdr_pulse)
+            split = int(w * (0.55 + 0.10 * pulse))
+            hdr_canvas.create_rectangle(0, HDR_H - 2, split, HDR_H,
                 fill=C["accent"], outline="", tags="bg")
+            hdr_canvas.create_rectangle(split, HDR_H - 2, w, HDR_H,
+                fill=C["neon"], outline="", tags="bg")
+
+            # Hairline top border for depth
+            hdr_canvas.create_rectangle(0, 0, w, 1,
+                fill="#1a2840", outline="", tags="bg")
+
             hdr_canvas.tag_lower("bg")
 
-        hdr_canvas.bind("<Configure>", _paint_hdr)
-        hdr_canvas.after(10, _paint_hdr)
+        def _pulse_hdr():
+            self._hdr_pulse = (self._hdr_pulse + 0.04) % (2 * math.pi)
+            _paint_hdr()
+            hdr_canvas.after(50, _pulse_hdr)
 
-        # Diamond logo
-        logo = tk.Canvas(hdr_canvas, width=28, height=28,
+        hdr_canvas.bind("<Configure>", _paint_hdr)
+        hdr_canvas.after(10, _pulse_hdr)
+
+        # Diamond logo (two-tone: cyan + neon purple inner)
+        logo = tk.Canvas(hdr_canvas, width=32, height=32,
                          bg=_HB, highlightthickness=0)
         hdr_canvas.create_window(18, HDR_H // 2, window=logo, anchor="w")
-        logo.create_polygon(14, 1, 27, 14, 14, 27, 1, 14,
+        logo.create_polygon(16, 1, 31, 16, 16, 31, 1, 16,
                             fill=C["accent"], outline="")
+        logo.create_polygon(16, 8, 24, 16, 16, 24, 8, 16,
+                            fill=C["neon"], outline="")
 
         # Title block
         title_f = tk.Frame(hdr_canvas, bg=_HB)
-        hdr_canvas.create_window(56, HDR_H // 2, window=title_f, anchor="w")
-        tk.Label(title_f, text="Exposure Checker",
+        hdr_canvas.create_window(60, HDR_H // 2, window=title_f, anchor="w")
+        title_row = tk.Frame(title_f, bg=_HB)
+        title_row.pack(anchor="w")
+        tk.Label(title_row, text="EXPOSURE CHECKER",
                  bg=_HB, fg=C["text"],
-                 font=("TkDefaultFont", 14, "bold")).pack(anchor="w")
-        tk.Label(title_f, text="Scan · Protect · Clean",
+                 font=("TkDefaultFont", 13, "bold")).pack(side=tk.LEFT)
+        tk.Label(title_row, text=f"  v{ec.__version__}",
+                 bg=_HB, fg=C["accent"],
+                 font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT)
+        tk.Label(title_f, text="SCAN  ·  OPTIMIZE  ·  PROTECT  ·  CLEAN",
                  bg=_HB, fg=C["muted"],
-                 font=("TkDefaultFont", 8)).pack(anchor="w")
+                 font=("TkDefaultFont", 7)).pack(anchor="w")
 
         # Animated seagull mascot (right of title)
-        GULL_W, GULL_H = 90, 58
+        GULL_W, GULL_H = 100, 64
         self._hdr_gull = tk.Canvas(hdr_canvas, width=GULL_W, height=GULL_H,
                                     bg=_HB, highlightthickness=0)
         hdr_canvas.create_window(310, HDR_H // 2,
                                   window=self._hdr_gull, anchor="w")
         self._hdr_gull_phase = 0.0
+        self._gull_boost_until = 0
+        self._gull_click_times: list = []   # for rapid-click easter egg
+        self._konami_seq: list = []
+        self._hdr_gull.bind("<Button-1>",        lambda _e: self._gull_check_in())
+        self._hdr_gull.bind("<Double-Button-1>", lambda _e: self._gull_summon_golden())
+        self._hdr_gull.bind("<Button-3>",        self._gull_right_click)
+        self._hdr_gull.bind("<Enter>",  lambda _e: self._hdr_gull.configure(cursor="hand2"))
+        self._hdr_gull.bind("<Leave>",  lambda _e: self._hdr_gull.configure(cursor=""))
         self._animate_hdr_gull()
+
+        # Konami code listener (↑↑↓↓←→←→ba → flock mode)
+        self.root.bind("<Key>", self._konami_check)
+
+        # Ambient seagull state
+        self._ambient_tops: list = []   # active Toplevel gull windows
+        self._schedule_ambient_gull()
 
         # Version + privilege pill (pinned right)
         priv = "ADMIN" if _is_root() else "STANDARD"
@@ -2059,7 +2120,7 @@ class App:
         ctrl.grid_columnconfigure(0, weight=1)
         ctrl.grid_columnconfigure(2, weight=1)
 
-        # Notebook with 4 tabs
+        # Notebook with scan tabs
         self._nb = ttk.Notebook(r)
         self._nb.pack(fill=tk.BOTH, expand=True, padx=16, pady=(6, 0))
 
@@ -2068,6 +2129,12 @@ class App:
             session_tracker=self._tracker)
         self._tab_antivirus = ScanTab(
             self._nb, "Antivirus", "Threat status",  self, self._run_antivirus,
+            session_tracker=self._tracker)
+        self._tab_performance = ScanTab(
+            self._nb, "Performance", "Boost status", self, self._run_performance,
+            session_tracker=self._tracker)
+        self._tab_protection = ScanTab(
+            self._nb, "Protection", "Shield status", self, self._run_protection,
             session_tracker=self._tracker)
         self._tab_cleaner   = ScanTab(
             self._nb, "Cleaner",   "Clean status",   self, self._run_cleaner,
@@ -2101,6 +2168,7 @@ class App:
         self._log.tag_configure("cmd",      foreground=C["cmd"])
         self._log.tag_configure("hdr",      foreground=C["hdr"])
         self._log.tag_configure("muted",    foreground=C["muted"])
+        self._log.tag_configure("neon",     foreground=C["neon"])
         self._log.tag_configure("critical", foreground=C["CRITICAL"])
         self._log.tag_configure("high",     foreground=C["HIGH"])
         log_sb = ttk.Scrollbar(log_outer, orient=tk.VERTICAL,
@@ -2169,21 +2237,224 @@ class App:
     def _animate_hdr_gull(self):
         c = self._hdr_gull
         c.delete("all")
-        flap = math.sin(self._hdr_gull_phase * 2 * math.pi)
-        # Fixing mode: gull turns warm amber and flaps faster
-        if getattr(self, "_gull_fixing", False):
-            _draw_gull_icon(c, 44, 30, flap=flap, scale=0.92,
+        # Realistic flap: ~2.5 Hz, asymmetric sine for natural wing beat
+        t = self._hdr_gull_phase
+        flap = math.sin(t) - 0.25 * math.sin(2 * t)
+        boosted = getattr(self, "_gull_boost_until", 0) > 0
+        if getattr(self, "_gull_fixing", False) or boosted:
+            _draw_gull_icon(c, 46, 32, flap=flap, scale=1.01,
                             body="#f0c060", wing="#d4a040",
                             beak="#e07010", eye="#3a2000")
-            self._hdr_gull_phase = (self._hdr_gull_phase + 0.038) % 1.0
+            self._hdr_gull_phase = (self._hdr_gull_phase + 0.19) % (2 * math.pi)
+            if boosted:
+                self._gull_boost_until -= 1
         else:
-            _draw_gull_icon(c, 44, 30, flap=flap, scale=0.92)
-            self._hdr_gull_phase = (self._hdr_gull_phase + 0.013) % 1.0
-        self.root.after(45, self._animate_hdr_gull)
+            _draw_gull_icon(c, 46, 32, flap=flap, scale=1.01)
+            self._hdr_gull_phase = (self._hdr_gull_phase + 0.10) % (2 * math.pi)
+        self.root.after(40, self._animate_hdr_gull)
 
     def set_gull_fixing(self, fixing: bool):
-        """Switch seagull mascot into/out of fix mode."""
         self._gull_fixing = fixing
+
+    # ── Quips & easter eggs ───────────────────────────────────────────────────
+
+    _GULL_QUIPS = [
+        "All checks are local — no cloud, no phone-home.",
+        "Squawk! Ready to scan, optimize, and protect.",
+        "Just a seagull keeping your rig safe.",
+        "100% offline. Your data stays yours.",
+        "Need a scan? Hit the button. I'll be here.",
+        "Optimize first, game later. Or, you know, now.",
+        "Venice was nice but this machine needs work.",
+        "No APIs. No secrets. Just local checks.",
+        "Click Scan — I'll watch the radar.",
+        "Privacy guaranteed. The gull has seen nothing.",
+        "Your frames aren't going to drop themselves.",
+        "I've seen worse rigs. Not many, but some.",
+        "Latency is the enemy. I know its address.",
+        "Every fix applied is a frame per second gained.",
+        "Gaming PC? More like waiting PC — until now.",
+        "I don't sleep. I scan.",
+        "Your GPU called. It said thank you.",
+        "Zero telemetry. The gull does not gossip.",
+        "They said get a real antivirus. I said squawk.",
+        "Frame drops are a choice. A bad one.",
+        "PCIe ASPM disabled. You're welcome.",
+        "Three monitors? Respect. Also, check your VRAM.",
+        "I have seen the registry. It was dark there.",
+        "Secure Boot on. Sleep schedule: nonexistent.",
+    ]
+    _GULL_FACTS = [
+        "Seagulls can drink both fresh and salt water — a special gland removes the salt.",
+        "Herring gulls can recognise individual human faces.",
+        "Gulls drop shellfish from height onto rocks to crack them open.",
+        "Some seagulls live up to 30 years in the wild.",
+        "Seagulls use the thermals rising off warm tarmac to soar without flapping.",
+        "A group of seagulls is called a colony, or more poetically, a screech.",
+        "Gulls communicate through specific calls — over 30 distinct vocalisations.",
+    ]
+    _KONAMI = ("Up","Up","Down","Down","Left","Right","Left","Right","b","a")
+    _gull_quip_idx = 0
+
+    def _konami_check(self, event):
+        self._konami_seq.append(event.keysym)
+        if len(self._konami_seq) > len(self._KONAMI):
+            self._konami_seq = self._konami_seq[-len(self._KONAMI):]
+        if tuple(self._konami_seq) == self._KONAMI:
+            self._konami_seq = []
+            self._set_status("KONAMI ACTIVATED — the skies darken with gulls!")
+            self._log_append("  ★ Konami code! Flock inbound.\n", "neon")
+            for i in range(8):
+                self.root.after(i * 320, self._launch_ambient_gull)
+
+    def _gull_check_in(self):
+        now = time.time()
+        self._gull_boost_until = 80
+        # Rapid-click easter egg: 5 clicks within 2 seconds → summon flock
+        self._gull_click_times = [t for t in self._gull_click_times if now - t < 2.0]
+        self._gull_click_times.append(now)
+        if len(self._gull_click_times) >= 5:
+            self._gull_click_times = []
+            self._set_status("RAPID CLICK — flock inbound!")
+            self._log_append("  ★ Rapid-click easter egg: flock inbound!\n", "neon")
+            for i in range(6):
+                self.root.after(i * 280, self._launch_ambient_gull)
+            return
+        quip = self._GULL_QUIPS[self.__class__._gull_quip_idx % len(self._GULL_QUIPS)]
+        self.__class__._gull_quip_idx += 1
+        self._set_status(quip)
+        self._log_append(f"  ✦ {quip}\n", "muted")
+        self._launch_ambient_gull()
+
+    def _gull_summon_golden(self):
+        """Double-click → special golden gull + surprise quip."""
+        self._gull_boost_until = 120
+        self._set_status("✦ A golden gull appears… legend says it brings frame drops to your enemies.")
+        self._log_append("  ★ Golden gull summoned via double-click!\n", "neon")
+        self._launch_ambient_gull(golden=True)
+
+    def _gull_right_click(self, event):
+        fact = random.choice(self._GULL_FACTS)
+        menu = tk.Menu(self.root, tearoff=0,
+                       bg=C["panel"], fg=C["text"],
+                       activebackground=C["accent"], activeforeground=C["bg"],
+                       font=("TkDefaultFont", 9))
+        menu.add_command(label=f"Gull fact: {fact}", state="disabled",
+                         foreground=C["muted"])
+        menu.add_separator()
+        menu.add_command(label="Summon ambient gull",
+                         command=self._launch_ambient_gull)
+        menu.add_command(label="Summon golden gull ✦",
+                         command=self._gull_summon_golden)
+        menu.add_command(label="FLOCK MODE (8 gulls)",
+                         command=lambda: [
+                             self._launch_ambient_gull()
+                             for _ in range(8)
+                         ])
+        menu.post(event.x_root, event.y_root)
+
+    # ── Ambient seagulls ──────────────────────────────────────────────────────
+
+    # Near-black transparency key used for Toplevel-based gulls.
+    # Windows: this exact colour becomes invisible via -transparentcolor.
+    # macOS: whole Toplevel is transparent via -transparent.
+    # Linux: window alpha set to 0.92 so this near-black bg almost disappears
+    #        against the dark panel surfaces.
+    _GULL_TRANS = "#010203"
+
+    def _schedule_ambient_gull(self):
+        """Schedule the next ambient gull crossing (every 20–50 s)."""
+        try:
+            delay = random.randint(20_000, 50_000)
+            self.root.after(delay, self._launch_ambient_gull)
+        except Exception:
+            pass
+
+    def _launch_ambient_gull(self, golden: bool = False):
+        """Float a seagull across the window in a transparent Toplevel overlay."""
+        def _start():
+            try:
+                w = self.root.winfo_width()
+                h = self.root.winfo_height()
+                if w < 200 or h < 100:
+                    self._schedule_ambient_gull()
+                    return
+
+                # 10 % larger than previous range (0.28–0.48 → 0.31–0.53)
+                scale  = random.uniform(0.31, 0.53)
+                speed  = random.uniform(2.2, 4.0)
+                ltr    = random.random() > 0.5
+                cw     = int(66 * scale + 10)
+                ch     = int(44 * scale + 10)
+
+                rx = self.root.winfo_rootx()
+                ry = self.root.winfo_rooty()
+                y  = random.randint(int(h * 0.08), int(h * 0.55))
+
+                start_x = -cw if ltr else w + cw
+                end_x   =  w + cw if ltr else -cw
+
+                # ── Transparent Toplevel (no black box) ────────────────────
+                top = tk.Toplevel(self.root)
+                top.overrideredirect(True)
+                top.configure(bg=self._GULL_TRANS)
+                top.attributes("-topmost", True)
+                try:
+                    if _UI_OS == "Windows":
+                        top.attributes("-transparentcolor", self._GULL_TRANS)
+                    elif _UI_OS == "Darwin":
+                        top.attributes("-transparent", True)
+                        top.configure(bg="systemTransparent")
+                    else:
+                        # Linux: whole-window alpha makes near-black bg nearly invisible
+                        top.attributes("-alpha", 0.92)
+                except Exception:
+                    pass
+                top.geometry(f"{cw}x{ch}+{rx + int(start_x)}+{ry + y}")
+
+                cnv = tk.Canvas(top, width=cw, height=ch,
+                                bg=self._GULL_TRANS, highlightthickness=0)
+                cnv.place(x=0, y=0)
+
+                # Colour scheme: golden for easter egg, natural white for normal
+                b_col  = "#f5d060" if golden else "white"
+                wg_col = "#d4a820" if golden else "#cce0ee"
+                bk_col = "#c07010" if golden else "#e8a020"
+
+                state = {"x": float(start_x), "flap_t": random.uniform(0, 6.28)}
+
+                def _tick():
+                    try:
+                        state["x"] += speed if ltr else -speed
+                        # Realistic wing beat: ~3 Hz asymmetric sine
+                        state["flap_t"] = (state["flap_t"] + 0.22) % (2 * math.pi)
+                        t = state["flap_t"]
+                        flap = math.sin(t) - 0.28 * math.sin(2 * t)
+
+                        if (ltr and state["x"] > end_x) or \
+                           (not ltr and state["x"] < end_x):
+                            top.destroy()
+                            self._schedule_ambient_gull()
+                            return
+
+                        top.geometry(f"{cw}x{ch}+{rx + int(state['x'])}+{ry + y}")
+                        cnv.delete("all")
+                        _draw_gull_icon(cnv, cw // 2, ch // 2, flap=flap,
+                                        scale=scale, body=b_col, wing=wg_col,
+                                        beak=bk_col, flipped=not ltr)
+                        self.root.after(36, _tick)
+                    except Exception:
+                        try:
+                            top.destroy()
+                        except Exception:
+                            pass
+                        self._schedule_ambient_gull()
+
+                self.root.after(36, _tick)
+            except Exception:
+                self._schedule_ambient_gull()
+
+        _start()
 
     # ── Scan runners ──────────────────────────────────────────────────────────
 
@@ -2216,6 +2487,17 @@ class App:
         ec.check_auth_log(reporter)
         ec.check_malware(reporter)
 
+    def _run_performance(self, reporter):
+        ec.check_startup(reporter)
+        ec.check_power_settings(reporter)
+        ec.check_gpu_settings(reporter)
+        ec.check_network_perf(reporter)
+        ec.check_memory_perf(reporter)
+        ec.check_system_resources(reporter)
+
+    def _run_protection(self, reporter):
+        ec.check_protection_hardening(reporter)
+
     def _run_cleaner(self, reporter):
         ec.check_system_cleaner(reporter)
         ec.check_startup(reporter)
@@ -2223,7 +2505,9 @@ class App:
     # ── Shared helpers ────────────────────────────────────────────────────────
 
     def _get_active_tab(self) -> ScanTab:
-        for tab in (self._tab_security, self._tab_antivirus, self._tab_cleaner):
+        for tab in (self._tab_security, self._tab_antivirus,
+                    self._tab_performance, self._tab_protection,
+                    self._tab_cleaner):
             try:
                 if tab.frame.winfo_ismapped():
                     return tab
@@ -2388,7 +2672,9 @@ class App:
     # ── Poll loop ─────────────────────────────────────────────────────────────
 
     def _poll(self):
-        for tab in (self._tab_security, self._tab_antivirus, self._tab_cleaner):
+        for tab in (self._tab_security, self._tab_antivirus,
+                    self._tab_performance, self._tab_protection,
+                    self._tab_cleaner):
             tab.poll()
         self.root.after(40, self._poll)
 
@@ -2397,54 +2683,101 @@ class App:
 
 def _draw_gull_icon(cnv, cx, cy, flap=0.0, scale=1.0,
                     body="white", wing="#cce0ee",
-                    beak="#e8a020", eye="#1a1a2a"):
-    """Draw a seagull on `cnv` centered at (cx, cy).
-    flap in [-1,1]: -1 wings down, +1 wings up.
-    Pass body/wing/beak/eye to override colours (use for monochrome styles)."""
-    s  = scale
-    wy = int(flap * 14 * s)
+                    beak="#e8a020", eye="#1a1a2a",
+                    flipped=False):
+    """Draw a realistic seagull on cnv centered at (cx, cy).
+    flap in [-1,+1]: +1 = wings up, -1 = wings down.
+    flipped=True mirrors the gull to face left (for right-to-left flight).
+    """
+    s = scale
+    m = -1 if flipped else 1   # x mirror multiplier
 
-    # Left wing
+    # Asymmetric wing displacement: far wing gets full travel, near wing foreshortened
+    wy_far  = int(flap * 16 * s)
+    wy_near = int(flap * 10 * s)
+
+    # Dark primary feather tips
+    tip_col = "#28364a" if body in ("white", "#e8edf4", "#f2f5fa", "#edf2fa") else "#1a2030"
+
+    # ── Far wing ─────────────────────────────────────────────────────────────
     cnv.create_polygon(
-        cx,              cy - int(2*s),
-        cx - int(8*s),  cy + wy // 2,
-        cx - int(22*s), cy + wy,
-        cx - int(18*s), cy + wy + int(4*s),
-        cx - int(6*s),  cy + int(2*s),
+        cx,                   cy - int(2 * s),
+        cx - m*int(9 * s),   cy + wy_far // 2,
+        cx - m*int(25 * s),  cy + wy_far,
+        cx - m*int(20 * s),  cy + wy_far + int(5 * s),
+        cx - m*int(7 * s),   cy + int(3 * s),
         smooth=True, fill=wing, outline="",
     )
-    # Right wing (foreshortened)
-    wy2 = int(flap * 8 * s)
+    # Far wing primary tip band
     cnv.create_polygon(
-        cx,              cy - int(2*s),
-        cx + int(5*s),  cy + wy2 // 2,
-        cx + int(14*s), cy + wy2,
-        cx + int(11*s), cy + wy2 + int(3*s),
-        cx + int(3*s),  cy + int(2*s),
+        cx - m*int(22 * s), cy + wy_far,
+        cx - m*int(25 * s), cy + wy_far,
+        cx - m*int(20 * s), cy + wy_far + int(5 * s),
+        cx - m*int(17 * s), cy + wy_far + int(4 * s),
+        fill=tip_col, outline="",
+    )
+
+    # ── Near wing ─────────────────────────────────────────────────────────────
+    cnv.create_polygon(
+        cx,                   cy - int(2 * s),
+        cx + m*int(5 * s),   cy + wy_near // 2,
+        cx + m*int(16 * s),  cy + wy_near,
+        cx + m*int(12 * s),  cy + wy_near + int(4 * s),
+        cx + m*int(4 * s),   cy + int(2 * s),
         smooth=True, fill=wing, outline="",
     )
-    # Body
-    cnv.create_oval(cx - int(11*s), cy - int(4*s),
-                    cx + int(11*s), cy + int(4*s),
+    # Near wing primary tip band
+    cnv.create_polygon(
+        cx + m*int(13 * s), cy + wy_near,
+        cx + m*int(16 * s), cy + wy_near,
+        cx + m*int(12 * s), cy + wy_near + int(4 * s),
+        cx + m*int(9 * s),  cy + wy_near + int(3 * s),
+        fill=tip_col, outline="",
+    )
+
+    # ── Body ─────────────────────────────────────────────────────────────────
+    cnv.create_oval(cx - int(12 * s), cy - int(4 * s),
+                    cx + int(12 * s), cy + int(5 * s),
                     fill=body, outline="")
-    # Head
-    cnv.create_oval(cx + int(7*s), cy - int(8*s),
-                    cx + int(16*s), cy,
+
+    # ── Head ─────────────────────────────────────────────────────────────────
+    cnv.create_oval(cx + m*int(8 * s),  cy - int(9 * s),
+                    cx + m*int(18 * s), cy + int(1 * s),
                     fill=body, outline="")
-    # Beak
-    cnv.create_polygon(cx + int(14*s), cy - int(5*s),
-                       cx + int(22*s), cy - int(4*s),
-                       cx + int(14*s), cy - int(2*s),
-                       fill=beak, outline="")
-    # Eye
-    cnv.create_oval(cx + int(11*s), cy - int(6*s),
-                    cx + int(14*s), cy - int(3*s),
+
+    # ── Beak ─────────────────────────────────────────────────────────────────
+    cnv.create_polygon(
+        cx + m*int(16 * s), cy - int(5 * s),
+        cx + m*int(24 * s), cy - int(4 * s),
+        cx + m*int(16 * s), cy - int(2 * s),
+        fill=beak, outline="",
+    )
+    # Beak tip accent (darker)
+    cnv.create_polygon(
+        cx + m*int(21 * s), cy - int(5 * s),
+        cx + m*int(24 * s), cy - int(4 * s),
+        cx + m*int(21 * s), cy - int(3 * s),
+        fill="#b05810", outline="",
+    )
+
+    # ── Eye ──────────────────────────────────────────────────────────────────
+    cnv.create_oval(cx + m*int(12 * s), cy - int(7 * s),
+                    cx + m*int(15 * s), cy - int(4 * s),
                     fill=eye, outline="")
-    # Tail
-    cnv.create_polygon(cx - int(11*s), cy,
-                       cx - int(18*s), cy - int(4*s),
-                       cx - int(18*s), cy + int(4*s),
-                       fill=body, outline="")
+    # Eye highlight
+    cnv.create_oval(cx + m*int(12 * s), cy - int(7 * s),
+                    cx + m*int(13 * s), cy - int(6 * s),
+                    fill="#ffffff", outline="")
+
+    # ── Tail (forked) ────────────────────────────────────────────────────────
+    cnv.create_polygon(
+        cx - m*int(12 * s), cy,
+        cx - m*int(20 * s), cy - int(5 * s),
+        cx - m*int(22 * s), cy - int(2 * s),
+        cx - m*int(19 * s), cy + int(5 * s),
+        cx - m*int(17 * s), cy + int(2 * s),
+        fill=body, outline="",
+    )
 
 
 # ── Venice splash animation ─────────────────────────────────────────────────────
@@ -2454,11 +2787,11 @@ class VeniceSplash:
     Venetian canal at dusk — one-point perspective, scrolling facades, lit
     windows reflected in the water."""
 
-    W, H = 640, 360
-    _DURATION = 4.2   # seconds total
-    _FADE_IN  = 0.35
-    _FADE_OUT = 0.50
-    _TICK_MS  = 36    # ~28 fps
+    W, H = 680, 380
+    _DURATION = 6.8   # seconds total — longer to feel premium
+    _FADE_IN  = 0.40
+    _FADE_OUT = 0.55
+    _TICK_MS  = 30    # ~33 fps
 
     _SKY_STOPS = [
         (0.00, "#0a0e30"),   # deep midnight blue at zenith
@@ -2601,6 +2934,9 @@ class VeniceSplash:
             "arch":      rng.random() < 0.22,
             "chimney":   rng.random() < 0.50,
             "chim_off":  rng.uniform(0.2, 0.8),
+            "balcony":   rng.random() < 0.42,
+            "boat":      rng.random() < 0.24,
+            "boat_side": rng.choice((-1, 1)),
         }
 
     def _gen_segments(self):
@@ -2702,6 +3038,23 @@ class VeniceSplash:
                                                 fill=self._shade("#b05820", fog * 0.55),
                                                 width=max(1, wr), tags="scene")
 
+                # Small wrought-iron balcony rail on nearer facades
+                if seg["balcony"] and z0 < 18:
+                    bz = z0 + (z1 - z0) * 0.52
+                    by_world = height * 0.48
+                    bx, bys, bs = self._proj(x, by_world, bz)
+                    bw = max(4, int(bs * 0.34))
+                    rail_y = bys + max(2, int(bs * 0.10))
+                    rail_c = self._shade("#161b22", max(0.35, fog))
+                    cnv.create_line(bx - bw, rail_y, bx + bw, rail_y,
+                                    fill=rail_c, width=max(1, int(bs * 0.018)),
+                                    tags="scene")
+                    for rk in range(5):
+                        rx = bx - bw + (2 * bw) * rk / 4
+                        cnv.create_line(rx, rail_y - max(2, int(bs * 0.10)),
+                                        rx, rail_y + max(1, int(bs * 0.04)),
+                                        fill=rail_c, tags="scene")
+
                 # Chimney pots on rooftop
                 if seg["chimney"] and z0 < 16:
                     chz = z0 + (z1 - z0) * seg["chim_off"]
@@ -2718,6 +3071,25 @@ class VeniceSplash:
                                     chx_s + ch_w + 1, chys - ch_h + ch_w,
                                     fill=self._shade("#2a1406", fog),
                                     outline="", tags="scene")
+
+            # A low moored boat/gondola silhouette gives the canal scale.
+            if seg["boat"] and z0 < 18:
+                bx = seg["boat_side"] * (hw - 0.92)
+                bz = z0 + (z1 - z0) * 0.58
+                sx, sy, bs = self._proj(bx, 0.05, bz)
+                bw = max(5, int(bs * 0.42))
+                bh = max(2, int(bs * 0.10))
+                boat_c = self._shade("#100b10", max(0.38, 1 - bz / 18))
+                cnv.create_polygon(
+                    sx - bw, sy - bh,
+                    sx + bw, sy - bh,
+                    sx + int(bw * 0.70), sy + bh,
+                    sx - int(bw * 0.70), sy + bh,
+                    fill=boat_c, outline="", tags="scene")
+                cnv.create_line(sx - int(bw * 0.40), sy - bh,
+                                sx - int(bw * 0.18), sy - bh * 5,
+                                fill=boat_c, width=max(1, int(bs * 0.018)),
+                                tags="scene")
 
             # Striped mooring pole (palo da ormeggio)
             if seg["pole"] and z0 < 16:
@@ -2791,54 +3163,128 @@ class VeniceSplash:
             cnv.create_line(wsx - whalf, wsy, wsx + whalf, wsy,
                             fill=shim_c, tags="scene")
 
-    def _draw_gull_back(self, t):
-        """Third-person seagull seen from behind, leading the camera."""
-        cnv = self._cnv
-        cnv.delete("gull")
-        cx = self.W / 2 + math.sin(t * 0.9) * 26
-        cy = self._hz - 38 + math.sin(t * 1.7) * 10
-        flap = math.sin(t * 3.2 * 2 * math.pi)          # wing angle
-        span, sweep = 46, 16 + flap * 14
-        body_c, wing_c, tip_c = "#f2f5fa", "#dde4ee", "#2a3140"
-        # Wings (symmetric, seen from behind)
+    def _draw_single_gull(self, cnv, cx, cy, t, freq=3.2, scale=1.0,
+                          alpha=1.0, tag="gull"):
+        """Draw one back-view seagull; alpha dims colours for distant gulls."""
+        flap = math.sin(t * freq * 2 * math.pi)
+        span  = int(46 * scale)
+        sweep = (16 + flap * 14) * scale
+        dim = lambda c: self._shade(c, alpha)
+        body_c = dim("#f2f5fa")
+        wing_c = dim("#dde4ee")
+        tip_c  = dim("#2a3140")
         for side in (-1, 1):
             cnv.create_polygon(
                 cx, cy,
                 cx + side * span * 0.45, cy - sweep * 0.7,
                 cx + side * span,        cy - sweep,
-                cx + side * span * 0.92, cy - sweep + 5,
-                cx + side * span * 0.4,  cy + 4,
-                fill=wing_c, outline="", smooth=True, tags="gull")
+                cx + side * span * 0.92, cy - sweep + 5 * scale,
+                cx + side * span * 0.4,  cy + 4 * scale,
+                fill=wing_c, outline="", smooth=True, tags=tag)
             cnv.create_polygon(
-                cx + side * span * 0.78, cy - sweep + 1,
+                cx + side * span * 0.78, cy - sweep + scale,
                 cx + side * span,        cy - sweep,
-                cx + side * span * 0.92, cy - sweep + 5,
-                fill=tip_c, outline="", tags="gull")
-        # Body + tail
-        cnv.create_oval(cx - 6, cy - 4, cx + 6, cy + 10,
-                        fill=body_c, outline="", tags="gull")
-        cnv.create_polygon(cx - 4, cy + 8, cx + 4, cy + 8, cx, cy + 16,
-                           fill=wing_c, outline="", tags="gull")
-        # Head peeking above the body
-        cnv.create_oval(cx - 3, cy - 9, cx + 3, cy - 3,
-                        fill=body_c, outline="", tags="gull")
+                cx + side * span * 0.92, cy - sweep + 5 * scale,
+                fill=tip_c, outline="", tags=tag)
+        r = int(6 * scale)
+        cnv.create_oval(cx - r, cy - int(4 * scale),
+                        cx + r, cy + int(10 * scale),
+                        fill=body_c, outline="", tags=tag)
+        cnv.create_polygon(
+            cx - int(4 * scale), cy + int(8 * scale),
+            cx + int(4 * scale), cy + int(8 * scale),
+            cx, cy + int(16 * scale),
+            fill=wing_c, outline="", tags=tag)
+        cnv.create_oval(cx - int(3 * scale), cy - int(9 * scale),
+                        cx + int(3 * scale), cy - int(3 * scale),
+                        fill=body_c, outline="", tags=tag)
+
+    def _draw_gull_back(self, t):
+        """Lead gull + two escort gulls in loose V-formation + water shadow."""
+        cnv = self._cnv
+        cnv.delete("gull")
+
+        # Lead gull (close, main character)
+        cx = self.W / 2 + math.sin(t * 0.9) * 26
+        cy = self._hz - 38 + math.sin(t * 1.7) * 10
+        self._draw_single_gull(cnv, cx, cy, t, freq=3.2, scale=1.0, alpha=1.0)
+
+        # Left escort (farther away, smaller, dimmer, slightly different phase)
+        ex1 = cx - 68 + math.sin(t * 0.7 + 1.1) * 14
+        ey1 = cy - 18 + math.sin(t * 1.3 + 0.4) * 7
+        self._draw_single_gull(cnv, ex1, ey1, t + 0.15, freq=2.9,
+                               scale=0.62, alpha=0.58, tag="gull")
+
+        # Right escort (even farther)
+        ex2 = cx + 84 + math.sin(t * 0.6 + 2.2) * 10
+        ey2 = cy - 28 + math.sin(t * 1.1 + 1.0) * 6
+        self._draw_single_gull(cnv, ex2, ey2, t + 0.28, freq=3.1,
+                               scale=0.46, alpha=0.38, tag="gull")
+
+        # Water-surface shadow / ripple under the lead gull
+        shadow_y = self._hz + (self._hz - cy) * 0.35
+        if shadow_y < self.H - 10:
+            for rrad, ralpha in (
+                ((18, 0.30), (28, 0.18), (38, 0.10))
+            ):
+                cnv.create_oval(
+                    cx - rrad, shadow_y - rrad // 4,
+                    cx + rrad, shadow_y + rrad // 4,
+                    outline=self._shade("#1e4a6a", ralpha),
+                    fill="", width=1, tags="gull"
+                )
 
     def _draw_titles(self):
         cnv = self._cnv
         cnv.delete("title")
-        ty = self.H - 64
+        ty = self.H - 72
+        progress = max(0.0, min(1.0, self._t / max(0.1, self._DURATION)))
+        stages = [
+            (0.00, "Initialising scan engine…"),
+            (0.10, "Loading port risk database…"),
+            (0.20, "Priming system cleaner…"),
+            (0.32, "Mapping protection modules…"),
+            (0.45, "Warming up GPU / power audit…"),
+            (0.58, "Loading network optimisation checks…"),
+            (0.70, "Calibrating startup analyser…"),
+            (0.82, "Compiling hardening rules…"),
+            (0.92, "Launching dashboard…"),
+        ]
+        stage = stages[0][1]
+        for threshold, label in reversed(stages):
+            if progress >= threshold:
+                stage = label
+                break
+        # Drop shadow
         cnv.create_text(self.W // 2 + 1, ty + 1, text="EXPOSURE CHECKER",
-                        fill="#03060c", font=("TkDefaultFont", 21, "bold"),
+                        fill="#020508", font=("TkDefaultFont", 22, "bold"),
                         anchor="center", tags="title")
         cnv.create_text(self.W // 2, ty, text="EXPOSURE CHECKER",
-                        fill="#e6edf3", font=("TkDefaultFont", 21, "bold"),
+                        fill="#e6edf3", font=("TkDefaultFont", 22, "bold"),
                         anchor="center", tags="title")
-        cnv.create_text(self.W // 2, ty + 26,
-                        text="Scan · Protect · Clean — on the machine you own",
-                        fill="#9aa6b5", font=("TkDefaultFont", 10),
+        cnv.create_text(self.W // 2, ty + 28,
+                        text="Scan  ·  Optimize  ·  Protect  ·  Clean — on the machine you own",
+                        fill="#8fa0b4", font=("TkDefaultFont", 10),
                         anchor="center", tags="title")
-        cnv.create_text(self.W // 2, ty + 46, text=f"v{ec.__version__}",
-                        fill="#56627a", font=("TkDefaultFont", 8),
+        # Progress bar — wider, with a glow fill
+        bar_w, bar_h = 280, 6
+        bx0 = self.W // 2 - bar_w // 2
+        by0 = ty + 46
+        filled = int(bar_w * progress)
+        cnv.create_rectangle(bx0, by0, bx0 + bar_w, by0 + bar_h,
+                             fill="#0d1824", outline="#1e3050", tags="title")
+        if filled > 0:
+            # Glow: slightly wider, dimmer rectangle behind
+            cnv.create_rectangle(bx0, by0 - 1,
+                                 bx0 + filled, by0 + bar_h + 1,
+                                 fill="#006888", outline="", tags="title")
+            cnv.create_rectangle(bx0, by0,
+                                 bx0 + filled, by0 + bar_h,
+                                 fill="#00b4d8", outline="", tags="title")
+        pct = int(progress * 100)
+        cnv.create_text(self.W // 2, ty + 62,
+                        text=f"{stage}   {pct}%   v{ec.__version__}",
+                        fill="#5a6a7a", font=("TkDefaultFont", 8),
                         anchor="center", tags="title")
 
     # ── Animation loop ────────────────────────────────────────────────────────
@@ -2927,7 +3373,7 @@ def _first_run_wizard(root: tk.Tk, app) -> None:
                style="Accent.TButton",
                command=lambda: _pick("quick")).pack(
         side=tk.LEFT, padx=14, ipadx=14, ipady=8)
-    ttk.Button(btn_f, text="Full Audit\nSecurity + AV + Cleaner",
+    ttk.Button(btn_f, text="Full Audit\nSecurity + AV + Boost + Cleaner",
                command=lambda: _pick("full")).pack(
         side=tk.LEFT, padx=14, ipadx=14, ipady=8)
 
@@ -2942,7 +3388,9 @@ def _first_run_wizard(root: tk.Tk, app) -> None:
     elif choice[0] == "full":
         root.after(150, app._tab_security.start_scan)
         root.after(300, app._tab_antivirus.start_scan)
-        root.after(450, app._tab_cleaner.start_scan)
+        root.after(450, app._tab_performance.start_scan)
+        root.after(600, app._tab_protection.start_scan)
+        root.after(750, app._tab_cleaner.start_scan)
 
 
 def _show_splash(root):
