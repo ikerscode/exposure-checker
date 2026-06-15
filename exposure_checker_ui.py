@@ -714,8 +714,10 @@ def _ensure_admin() -> None:
     elif _UI_OS == "Linux":
         pkexec = shutil.which("pkexec")
         if pkexec:
-            # sys.argv[0] is the .py filename, not an executable — must prefix python3
-            os.execvp(pkexec, [pkexec, sys.executable] + sys.argv)
+            # Use absolute path so pkexec can find the script regardless of CWD
+            # (CWD is unpredictable when launched from a .desktop file)
+            script = os.path.abspath(__file__)
+            os.execvp(pkexec, [pkexec, sys.executable, script] + sys.argv[1:])
 
     _tmp = tk.Tk()
     _tmp.withdraw()
