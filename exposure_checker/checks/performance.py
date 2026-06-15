@@ -116,10 +116,10 @@ def _check_startup_windows(reporter):
             continue
         dest_root = os.path.join(
             os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
-            "ExposureChecker", "DisabledStartup",
+            "Gullwing", "DisabledStartup",
         )
         if env == "PROGRAMDATA":
-            dest_root = os.path.join(base, "ExposureChecker", "DisabledStartup")
+            dest_root = os.path.join(base, "Gullwing", "DisabledStartup")
         for entry in entries:
             if entry.name.lower() == "desktop.ini":
                 continue
@@ -180,9 +180,9 @@ def _mac_disable_launch_item_cmd(path: str, scope: str) -> str:
     home = os.path.expanduser("~")
     if path.startswith(home):
         dest_dir = os.path.join(home, "Library", "Application Support",
-                                "Exposure Checker", "Disabled LaunchItems")
+                                "Gullwing", "Disabled LaunchItems")
     else:
-        dest_dir = "/Library/Application Support/Exposure Checker/Disabled LaunchItems"
+        dest_dir = "/Library/Application Support/Gullwing/Disabled LaunchItems"
     dest = os.path.join(dest_dir, os.path.basename(path))
     domain = "system" if scope == "system daemon" else "gui/$(id -u)"
     return (

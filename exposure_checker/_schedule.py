@@ -60,7 +60,7 @@ def _send_notification(to_email, report_data):
             counts[sev] = counts.get(sev, 0) + 1
 
     lines = [
-        f"Exposure Checker Scan Report",
+        f"Gullwing Scan Report",
         f"Target   : {report_data.get('target', 'localhost')}",
         f"Time     : {report_data.get('timestamp', '')}",
         f"Score    : {score}/100  Grade: {grade}",
@@ -76,10 +76,10 @@ def _send_notification(to_email, report_data):
     else:
         lines.append("No critical or high findings detected.")
     lines.append("")
-    lines.append("-- Exposure Checker (self-hosted) --")
+    lines.append("-- Gullwing (self-hosted) --")
 
     msg = email.message.EmailMessage()
-    msg["Subject"] = f"[exposure-checker] Score {score}/100 Grade {grade} — {report_data.get('target','localhost')}"
+    msg["Subject"] = f"[gullwing] Score {score}/100 Grade {grade} — {report_data.get('target','localhost')}"
     msg["From"] = smtp["from"]
     msg["To"] = to_email
     msg.set_content("\n".join(lines))
@@ -288,7 +288,7 @@ def _install_schedule_macos(sched: dict) -> tuple:
 def _install_schedule_windows(sched: dict) -> tuple:
     """Install a Windows Task Scheduler entry for scheduled scans."""
     try:
-        task_name = "ExposureCheckerScan"
+        task_name = "GullwingScan"
         # Remove existing
         _ps(f'Unregister-ScheduledTask -TaskName "{task_name}" -Confirm:$false -ErrorAction SilentlyContinue')
         if not sched.get("enabled"):

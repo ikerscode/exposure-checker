@@ -1,18 +1,18 @@
-# Exposure Checker v1.0.6
+# Gullwing v1.0.7
 
-**Scan · Optimize · Protect · Clean** — a fully local, offline desktop tool for Windows, macOS, and Linux.  
-No API keys. No cloud. No telemetry. Everything runs on your machine.
+**Tune it. Lock it. Send it.** — a fully local, offline desktop tool for Windows, macOS, and Linux.  
+No cloud. No APIs. No telemetry. Everything runs on your machine.
 
 ---
 
 ## Quick Start
 
 ### Windows
-Double-click `exposure_checker_ui.py` — it will ask for admin rights, then open.
+Double-click `gullwing_ui.py` — it will ask for admin rights, then open.
 
 ### macOS
 ```bash
-python3 exposure_checker_ui.py
+python3 gullwing_ui.py
 ```
 
 ### Linux
@@ -20,25 +20,25 @@ python3 exposure_checker_ui.py
    ```bash
    sudo apt install python3-tk -y
    ```
-2. Double-click **`ExposureChecker.desktop`** → click **Allow Launching** the first time.  
+2. Double-click **`Gullwing.desktop`** → click **Allow Launching** the first time.  
    Or from terminal:
    ```bash
-   bash run.sh
+   bash launchers/run.sh
    ```
 
 ---
 
 ## What It Does
 
-The app has three scan tabs. Each finding shows its severity, a plain-English explanation, and a **Fix** button where a fix is available.
+Gullwing scans your machine for security vulnerabilities and performance bottlenecks, then offers one-click fixes. Every finding shows its severity, a plain-English explanation, and a **Fix** button where a fix is available.
 
 | Severity | Meaning |
 |---|---|
-| 🔴 CRITICAL | Immediate risk — fix now |
-| 🟠 HIGH | Serious issue |
-| 🟡 MEDIUM | Should be addressed |
-| 🔵 REVIEW | Investigate and decide |
-| ⚪ INFO | Informational — no auto-fix |
+| CRITICAL | Immediate risk — fix now |
+| HIGH | Serious issue |
+| MEDIUM | Should be addressed |
+| REVIEW | Investigate and decide |
+| INFO | Informational — no auto-fix |
 
 ---
 
@@ -155,10 +155,10 @@ Everything that affects frame rate, input latency, and system responsiveness.
 
 | Check | Platforms | What it fixes |
 |---|---|---|
-| No active firewall | Win / macOS / Linux | 🔴 Alerts — no inbound packet filtering |
-| Windows Firewall disabled on all profiles | Windows | 🟠 Alerts to re-enable via Windows Security |
-| ufw installed but inactive | Linux | 🟠 Enables ufw |
-| No firewall detected | macOS | 🟠 Directs to System Settings → Firewall |
+| No active firewall | Win / macOS / Linux | Alerts — no inbound packet filtering |
+| Windows Firewall disabled on all profiles | Windows | Alerts to re-enable via Windows Security |
+| ufw installed but inactive | Linux | Enables ufw |
+| No firewall detected | macOS | Directs to System Settings → Firewall |
 
 ### Listening Services
 
@@ -192,8 +192,8 @@ Everything that affects frame rate, input latency, and system responsiveness.
 
 | Check | Platforms | What it fixes |
 |---|---|---|
-| Docker socket world-writable | Linux | 🔴 Critical — equivalent to giving root to anyone |
-| Docker socket world-readable | Linux | 🟠 Restricts socket permissions |
+| Docker socket world-writable | Linux | Critical — equivalent to giving root to anyone |
+| Docker socket world-readable | Linux | Restricts socket permissions |
 | Docker image CVE scan (Trivy) | Linux | Scans local images for known CVEs if Trivy is installed |
 
 ### Malware Indicators
@@ -213,33 +213,33 @@ Everything that affects frame rate, input latency, and system responsiveness.
 |---|---|---|
 | TPM 2.0 not activated | TPM present but not enabled in BIOS | Info only |
 | Secure Boot disabled | UEFI Secure Boot off | Info — requires BIOS change |
-| Memory Integrity (HVCI / Core Isolation) off | Hypervisor-protected code integrity disabled | ✅ Enables via registry + reboot |
-| UAC set to never notify | User Account Control fully disabled | ✅ Re-enables UAC prompt |
-| AutoRun not fully disabled | USB/disc autorun can execute code silently | ✅ Sets NoDriveTypeAutoRun=0xFF |
-| Defender Real-Time Protection off | 🔴 Live malware scanning disabled | ✅ Re-enables via PowerShell |
-| Defender script scanning disabled | 🟠 PowerShell/script malware won't be caught | ✅ Re-enables script scanning |
-| SMBv1 enabled | Legacy protocol exploited by WannaCry/NotPetya | ✅ Disables SMBv1 |
+| Memory Integrity (HVCI / Core Isolation) off | Hypervisor-protected code integrity disabled | Enables via registry + reboot |
+| UAC set to never notify | User Account Control fully disabled | Re-enables UAC prompt |
+| AutoRun not fully disabled | USB/disc autorun can execute code silently | Sets NoDriveTypeAutoRun=0xFF |
+| Defender Real-Time Protection off | Live malware scanning disabled | Re-enables via PowerShell |
+| Defender script scanning disabled | PowerShell/script malware won't be caught | Re-enables script scanning |
+| SMBv1 enabled | Legacy protocol exploited by WannaCry/NotPetya | Disables SMBv1 |
 | Remote Desktop enabled | RDP exposed — common brute-force target | Info — disable if not needed |
 | Remote Assistance enabled | Allows unsolicited remote access | Info |
-| Guest account enabled | Unauthenticated local access | ✅ Disables guest account |
+| Guest account enabled | Unauthenticated local access | Disables guest account |
 | BitLocker not enabled on system drive | Drive readable if physically removed | Info — enable in Windows Security |
-| Exploit Protection Force ASLR off | Memory layout not randomised | ✅ Enables Force ASLR |
-| Controlled Folder Access off | Ransomware can write to documents freely | ✅ Enables CFA |
-| Potentially unwanted app protection off | PUA/adware not blocked | ✅ Enables PUA protection |
-| Defender network protection off | Malicious URLs not blocked at network level | ✅ Enables network protection |
+| Exploit Protection Force ASLR off | Memory layout not randomised | Enables Force ASLR |
+| Controlled Folder Access off | Ransomware can write to documents freely | Enables CFA |
+| Potentially unwanted app protection off | PUA/adware not blocked | Enables PUA protection |
+| Defender network protection off | Malicious URLs not blocked at network level | Enables network protection |
 
 ### macOS Hardening
 
 | Check | What it detects | Fix available |
 |---|---|---|
-| FileVault off | 🟠 Disk unencrypted — readable if Mac is stolen | Info — enable in System Settings |
-| Gatekeeper disabled | 🟠 Unsigned/unnotarised apps run without warning | ✅ `spctl --master-enable` |
-| System Integrity Protection (SIP) disabled | 🟠 Root can modify protected system files | Info — re-enable via Recovery Mode |
-| Guest user account enabled | Unauthenticated local access | ✅ Disables via defaults write |
-| Screen lock never triggered | Physical access = full access | ✅ Sets 5-minute idle lock |
-| Application Firewall off | 🟠 No app-level inbound filtering | ✅ Enables via socketfilterfw |
-| Firewall stealth mode off | Mac responds to unsolicited network probes | ✅ Enables stealth mode |
-| Background security updates disabled | System won't auto-patch vulnerabilities | ✅ Enables automatic updates |
+| FileVault off | Disk unencrypted — readable if Mac is stolen | Info — enable in System Settings |
+| Gatekeeper disabled | Unsigned/unnotarised apps run without warning | `spctl --master-enable` |
+| System Integrity Protection (SIP) disabled | Root can modify protected system files | Info — re-enable via Recovery Mode |
+| Guest user account enabled | Unauthenticated local access | Disables via defaults write |
+| Screen lock never triggered | Physical access = full access | Sets 5-minute idle lock |
+| Application Firewall off | No app-level inbound filtering | Enables via socketfilterfw |
+| Firewall stealth mode off | Mac responds to unsolicited network probes | Enables stealth mode |
+| Background security updates disabled | System won't auto-patch vulnerabilities | Enables automatic updates |
 | XProtect bundle missing | macOS built-in malware signatures absent | Info |
 
 ### Linux Hardening
@@ -248,21 +248,47 @@ Everything that affects frame rate, input latency, and system responsiveness.
 |---|---|---|
 | AppArmor not loaded | Mandatory access control not enforcing | Info |
 | SELinux permissive or disabled | MAC not enforcing policies | Info |
-| TCP SYN cookies disabled | 🟠 Vulnerable to SYN flood DoS attacks | ✅ `sysctl net.ipv4.tcp_syncookies=1` |
-| ASLR not set to full randomisation | Memory layout predictable — aids exploits | ✅ `sysctl kernel.randomize_va_space=2` |
-| dmesg readable by all users | Kernel addresses leak to unprivileged users | ✅ Sets `kernel.dmesg_restrict=1` |
-| Core dumps permitted for setuid processes | Sensitive memory can be dumped to disk | ✅ Sets `fs.suid_dumpable=0` |
-| Kernel pointer leaks not restricted | `/proc` leaks kernel addresses | ✅ Sets `kptr_restrict=2` |
-| Unattended security upgrades off | System won't auto-patch CVEs | ✅ Installs/enables unattended-upgrades |
-| fail2ban not running | No brute-force protection on SSH | ✅ Starts fail2ban service |
+| TCP SYN cookies disabled | Vulnerable to SYN flood DoS attacks | `sysctl net.ipv4.tcp_syncookies=1` |
+| ASLR not set to full randomisation | Memory layout predictable — aids exploits | `sysctl kernel.randomize_va_space=2` |
+| dmesg readable by all users | Kernel addresses leak to unprivileged users | Sets `kernel.dmesg_restrict=1` |
+| Core dumps permitted for setuid processes | Sensitive memory can be dumped to disk | Sets `fs.suid_dumpable=0` |
+| Kernel pointer leaks not restricted | `/proc` leaks kernel addresses | Sets `kptr_restrict=2` |
+| Unattended security upgrades off | System won't auto-patch CVEs | Installs/enables unattended-upgrades |
+| fail2ban not running | No brute-force protection on SSH | Starts fail2ban service |
 | auditd not running | No kernel-level audit trail | Info |
-| SSH permits root login | 🟠 Root accessible directly over network | ✅ Sets `PermitRootLogin no` in sshd_config |
+| SSH permits root login | Root accessible directly over network | Sets `PermitRootLogin no` in sshd_config |
+
+---
+
+## Benchmark Tab
+
+Gullwing includes a pure-Python system benchmark with no external dependencies. Results are graded S through F:
+
+| Tier | Meaning |
+|---|---|
+| S | Exceptional — enthusiast-grade hardware |
+| A | Above average — smooth for all workloads |
+| B | Solid — meets expectations |
+| C | Below average — may bottleneck under load |
+| D / F | Underperforming — investigate thermals or hardware |
+
+Tests: SHA-256 throughput (CPU hash), trigonometric Mop/s (CPU float), memory bandwidth, and sequential disk write speed.
+
+---
+
+## Overclocking Advisory Tab
+
+Gullwing can detect and report on overclocking opportunities for CPU, GPU, RAM, and network cards. It **never automates clock or voltage changes** — all findings are advisory only.
+
+**MSI Mode** (Message Signalled Interrupts) is the one exception where a registry fix is offered, because it is a driver-level interrupt routing change with no voltage or frequency implications.
+
+Every overclocking finding displays a risk warning. Do not act on these findings unless you understand what you are doing.
 
 ---
 
 ## All Fixes Are Local
 
-Every fix the app applies is a local shell command, PowerShell command, or registry write. There are no:
+Every fix Gullwing applies is a local shell command, PowerShell command, or registry write. There are no:
 - API calls or cloud connections
 - Telemetry or analytics
 - Stored credentials or secrets
@@ -275,10 +301,10 @@ The Fix button shows you the exact command it will run. You are always in contro
 
 | Platform | Requirements |
 |---|---|
-| Windows | Python 3.8+, tkinter (included with standard Python) |
-| macOS | Python 3.8+, tkinter (`brew install python-tk`) |
-| Linux | Python 3.8+, `python3-tk` (`sudo apt install python3-tk`) |
+| Windows | Python 3.9+, tkinter (included with standard Python) |
+| macOS | Python 3.9+, tkinter (`brew install python-tk`) |
+| Linux | Python 3.9+, `python3-tk` (`sudo apt install python3-tk`) |
 
 ---
 
-*Exposure Checker v1.0.6 — built for gamers who take their rig seriously.*
+*Gullwing v1.0.7 — built for people who want their machine to perform.*

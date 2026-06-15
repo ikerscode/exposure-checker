@@ -1,4 +1,4 @@
-# Exposure Checker — Windows installer
+# Gullwing — Windows installer
 # Run from an elevated PowerShell prompt:
 #   Set-ExecutionPolicy Bypass -Scope Process -Force
 #   .\install.ps1
@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $MyInvocation.MyCommand.Path
 $venv = Join-Path $repo ".venv"
 
-Write-Host "Exposure Checker - Windows installer"
+Write-Host "Gullwing - Windows installer"
 Write-Host ""
 
 # Require Python 3.9+
@@ -40,13 +40,13 @@ Write-Host "[3/3] Creating launcher..."
 $appsDir = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
 $launcher = @"
 @echo off
-"$venv\Scripts\python.exe" "$repo\exposure_checker.py" %*
+"$venv\Scripts\python.exe" "$repo\gullwing_ui.py" %*
 "@
-Set-Content -Path "$appsDir\exposure-checker.cmd" -Value $launcher
+Set-Content -Path "$appsDir\gullwing.cmd" -Value $launcher
 
 Write-Host ""
 Write-Host "Done. Open a new terminal and run:"
-Write-Host "  exposure-checker --full-audit"
+Write-Host "  gullwing --full-audit"
 Write-Host ""
 Write-Host "Note: some checks (firewall, Defender, scheduled tasks) need an"
 Write-Host "      elevated (Administrator) terminal for full results."

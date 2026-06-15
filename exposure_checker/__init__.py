@@ -1,5 +1,5 @@
 """
-Exposure Checker — local security, performance, and cleaner scanner.
+Gullwing — local security, performance, and cleaner scanner.
 
 This package re-exports every public symbol so that existing code using
 ``import exposure_checker as ec`` continues to work unchanged.

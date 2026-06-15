@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0.7
+Name=Gullwing
+Comment=Tune it. Lock it. Send it.
+Exec=bash -c 'python3 "$(dirname "$(dirname "$(realpath "%k")")")/gullwing_ui.py"'
+Icon=utilities-system-monitor
+Terminal=false
+Type=Application
+Categories=System;Security;Utility;
+StartupNotify=true

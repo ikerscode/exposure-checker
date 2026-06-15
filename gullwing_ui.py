@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Exposure Checker — desktop interface.
+Gullwing — desktop interface.
 
-    exposure-checker-ui
-    python3 exposure_checker_ui.py
+    gullwing-ui
+    python3 gullwing_ui.py
 """
 import datetime
 import json
@@ -731,12 +731,12 @@ def _ensure_admin() -> None:
     if _UI_OS == "Windows":
         how = "Right-click the app → 'Run as administrator'."
     elif _UI_OS == "Darwin":
-        how = "Launch from a terminal with: sudo exposure-checker-ui"
+        how = "Launch from a terminal with: sudo gullwing-ui"
     else:
-        how = "Launch with: pkexec exposure-checker-ui  or  sudo exposure-checker-ui"
+        how = "Launch with: pkexec gullwing-ui  or  sudo gullwing-ui"
     messagebox.showerror(
         "Administrator Required",
-        "Exposure Checker needs administrator privileges to scan your system.\n\n"
+        "Gullwing needs administrator privileges to scan your system.\n\n"
         + how,
         parent=_tmp,
     )
@@ -954,7 +954,7 @@ def _show_fix_denied_dialog(root, findings):
         run_hint = "Run these commands in an elevated (Administrator) PowerShell."
         cmds_text = "\n".join(all_cmds)
     else:
-        run_hint = "Run these commands in a terminal, or launch\nexposure-checker-ui with sudo to auto-apply."
+        run_hint = "Run these commands in a terminal, or launch\ngullwing-ui with sudo to auto-apply."
         cmds_text = "\n".join(f"sudo {c}" for c in all_cmds)
     tk.Label(dlg, text=run_hint,
              bg=C["panel"], fg=C["muted"],
@@ -1958,7 +1958,7 @@ class SnapshotsTab:
 class App:
     def __init__(self, root: tk.Tk):
         self.root = root
-        root.title("Exposure Checker  ·  Gull")
+        root.title("Gullwing")
         root.minsize(900, 600)
         root.configure(bg=C["bg"])
         root.resizable(True, True)
@@ -2053,13 +2053,13 @@ class App:
         hdr_canvas.create_window(60, HDR_H // 2, window=title_f, anchor="w")
         title_row = tk.Frame(title_f, bg=_HB)
         title_row.pack(anchor="w")
-        tk.Label(title_row, text="EXPOSURE CHECKER",
+        tk.Label(title_row, text="GULLWING",
                  bg=_HB, fg=C["text"],
                  font=("TkDefaultFont", 13, "bold")).pack(side=tk.LEFT)
         tk.Label(title_row, text=f"  v{ec.__version__}",
                  bg=_HB, fg=C["accent"],
                  font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT)
-        tk.Label(title_f, text="SCAN  ·  OPTIMIZE  ·  PROTECT  ·  CLEAN",
+        tk.Label(title_f, text="Tune it. Lock it. Send it.",
                  bg=_HB, fg=C["muted"],
                  font=("TkDefaultFont", 7)).pack(anchor="w")
 
@@ -2598,7 +2598,7 @@ class App:
                 fg=col,
             )
             self.root.title(
-                f"Exposure Checker  ·  Grade {best_grade}  ·  Gull"
+                f"Gullwing  ·  Grade {best_grade}  ·  Gull"
             )
 
     def _log_append(self, text: str, tag: str = ""):
@@ -3263,15 +3263,15 @@ class VeniceSplash:
         ty = self.H - 72
         progress = max(0.0, min(1.0, self._t / max(0.1, self._DURATION)))
         stages = [
-            (0.00, "Initialising scan engine…"),
-            (0.10, "Loading port risk database…"),
-            (0.20, "Priming system cleaner…"),
-            (0.32, "Mapping protection modules…"),
-            (0.45, "Warming up GPU / power audit…"),
-            (0.58, "Loading network optimisation checks…"),
-            (0.70, "Calibrating startup analyser…"),
-            (0.82, "Compiling hardening rules…"),
-            (0.92, "Launching dashboard…"),
+            (0.00, "Detecting platform and loading base configuration…"),
+            (0.10, "Indexing port risk database — 1 024 known services…"),
+            (0.22, "Locating cron, launchd, and Task Scheduler entries…"),
+            (0.35, "Compiling kernel hardening rule-set — 34 sysctl checks…"),
+            (0.47, "Mapping SUID/SGID binary search paths…"),
+            (0.58, "Registering GPU, power, and NIC probe routines…"),
+            (0.70, "Loading 90+ performance and security checks across 7 modules…"),
+            (0.82, "Building protection hardening baseline…"),
+            (0.92, "All systems ready — launching Gullwing…"),
         ]
         stage = stages[0][1]
         for threshold, label in reversed(stages):
@@ -3279,10 +3279,10 @@ class VeniceSplash:
                 stage = label
                 break
         # Drop shadow
-        cnv.create_text(self.W // 2 + 1, ty + 1, text="EXPOSURE CHECKER",
+        cnv.create_text(self.W // 2 + 1, ty + 1, text="GULLWING",
                         fill="#020508", font=("TkDefaultFont", 22, "bold"),
                         anchor="center", tags="title")
-        cnv.create_text(self.W // 2, ty, text="EXPOSURE CHECKER",
+        cnv.create_text(self.W // 2, ty, text="GULLWING",
                         fill="#e6edf3", font=("TkDefaultFont", 22, "bold"),
                         anchor="center", tags="title")
         cnv.create_text(self.W // 2, ty + 28,
@@ -3365,7 +3365,7 @@ def _first_run_wizard(root: tk.Tk, app) -> None:
         pass
 
     dlg = tk.Toplevel(root)
-    dlg.title("Welcome to Exposure Checker")
+    dlg.title("Welcome to Gullwing")
     dlg.configure(bg=C["bg"])
     dlg.resizable(False, False)
     dlg.transient(root)

@@ -42,7 +42,7 @@ def main():
 
     if len(sys.argv) > 1 and sys.argv[1] == "headless":
         import argparse as _ap
-        p = _ap.ArgumentParser(prog="exposure-checker headless")
+        p = _ap.ArgumentParser(prog="gullwing headless")
         p.add_argument("--tabs", nargs="+",
                        default=["security"],
                        choices=["security", "antivirus", "performance",
@@ -57,9 +57,9 @@ def main():
         return
 
     parser = argparse.ArgumentParser(
-        prog="exposure-checker",
+        prog="gullwing",
         description="Scan a machine YOU OWN for risky open ports and weak config.")
-    parser.add_argument("--version", action="version", version=f"exposure-checker {__version__}")
+    parser.add_argument("--version", action="version", version=f"gullwing {__version__}")
     parser.add_argument("target", nargs="?", default="127.0.0.1",
                         help="IP or hostname to scan (default: your own machine).")
     parser.add_argument("--timeout", type=float, default=1.0,
@@ -179,7 +179,7 @@ def main():
 
     if not args.json:
         print("=" * 66)
-        print("  EXPOSURE CHECKER")
+        print("  GULLWING")
         print("  !  Only scan systems you own or are authorised to test.")
         print("=" * 66)
 

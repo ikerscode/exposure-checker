@@ -85,30 +85,30 @@ def _notify_desktop(results: list) -> None:
     n_crit = counts.get("CRITICAL", 0)
     if n_crit > 0 or grade == "F":
         urgency = "critical"
-        title   = f"Gull: Action required — Grade {grade}"
-        body    = (f"{n_crit} critical issue(s) found. Open Exposure Checker to fix."
+        title   = f"Gullwing: Action required — Grade {grade}"
+        body    = (f"{n_crit} critical issue(s) found. Open Gullwing to fix."
                    if n_crit else f"Score {score}/100. Immediate attention needed.")
     elif grade in ("D", "C"):
         urgency = "normal"
-        title   = f"Gull: Security check — Grade {grade}"
+        title   = f"Gullwing: Security check — Grade {grade}"
         body    = f"Score {score}/100. Some issues need attention."
     else:
         urgency = "low"
-        title   = f"Gull: All clear — Grade {grade}"
+        title   = f"Gullwing: All clear — Grade {grade}"
         body    = f"Score {score}/100. No critical issues found."
 
     if _OS == "Linux":
         try:
             subprocess.run(
                 ["notify-send", "--urgency", urgency,
-                 "--app-name", "Exposure Checker", title, body],
+                 "--app-name", "Gullwing", title, body],
                 timeout=5, capture_output=True,
             )
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
     elif _OS == "Darwin":
         script = (f'display notification "{body}" '
-                  f'with title "Exposure Checker" subtitle "{title}"')
+                  f'with title "Gullwing" subtitle "{title}"')
         try:
             subprocess.run(["osascript", "-e", script], timeout=5, capture_output=True)
         except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -123,7 +123,7 @@ def _notify_desktop(results: list) -> None:
             f"$t.GetElementsByTagName('text')[0].AppendChild($t.CreateTextNode('{title}')) | Out-Null; "
             f"$t.GetElementsByTagName('text')[1].AppendChild($t.CreateTextNode('{body}')) | Out-Null; "
             f"$n = [Windows.UI.Notifications.ToastNotification]::new($t); "
-            f"[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('ExposureChecker').Show($n)"
+            f"[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Gullwing').Show($n)"
         )
         try:
             _ps(ps_cmd, timeout=5)
