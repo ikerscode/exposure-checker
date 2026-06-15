@@ -3420,7 +3420,10 @@ def main():
         ec.main()
         return
 
-    _ensure_admin()
+    # Windows/macOS need root at launch; Linux scans work as a regular user
+    # and fixes handle their own elevation via pkexec when needed.
+    if _UI_OS != "Linux":
+        _ensure_admin()
 
     root = tk.Tk()
     root.withdraw()
