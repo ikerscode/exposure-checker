@@ -714,10 +714,17 @@ def _ensure_admin() -> None:
     elif _UI_OS == "Linux":
         pkexec = shutil.which("pkexec")
         if pkexec:
-            # Use absolute path so pkexec can find the script regardless of CWD
-            # (CWD is unpredictable when launched from a .desktop file)
+            # pkexec strips DISPLAY/WAYLAND_DISPLAY so Tkinter can't open a window.
+            # Pass them explicitly via `env` so the elevated process can find the screen.
             script = os.path.abspath(__file__)
-            os.execvp(pkexec, [pkexec, sys.executable, script] + sys.argv[1:])
+            env_vars = []
+            for var in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR",
+                        "DBUS_SESSION_BUS_ADDRESS"):
+                val = os.environ.get(var)
+                if val:
+                    env_vars.append(f"{var}={val}")
+            env_cmd = [pkexec, "env"] + env_vars + [sys.executable, script] + sys.argv[1:]
+            os.execvp(pkexec, env_cmd)
 
     _tmp = tk.Tk()
     _tmp.withdraw()
