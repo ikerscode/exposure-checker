@@ -4253,11 +4253,27 @@ def main():
     # its own window *before* Tk is created. Falls back to the Tk splash below
     # if pygame is not installed or anything goes wrong.
     used_pygame_splash = False
+    _splash_err = ""
     try:
         import gullwing_splash
         used_pygame_splash = gullwing_splash.run_splash(version=ec.__version__)
-    except Exception:
+    except Exception as _e:
         used_pygame_splash = False
+        _splash_err = repr(_e)
+
+    # Diagnostic breadcrumb: records which interpreter launched the app and
+    # whether the cinematic splash ran. Lets us tell a system-python launch
+    # (old Tk splash) from a venv launch at a glance. Best-effort; never fatal.
+    try:
+        import datetime as _dt
+        with open(os.path.join(tempfile.gettempdir(), "gullwing_launch.log"),
+                  "a") as _lg:
+            _lg.write(
+                f"{_dt.datetime.now():%Y-%m-%d %H:%M:%S}  "
+                f"python={sys.executable}  cinematic_splash={used_pygame_splash}"
+                + (f"  err={_splash_err}" if _splash_err else "") + "\n")
+    except Exception:
+        pass
 
     root = tk.Tk()
     root.withdraw()
