@@ -1515,6 +1515,7 @@ class ScanTab:
         self._reporter_data: dict        = {}
         self._scanning:      bool        = False
         self._last_html:     str         = ""
+        self._post_fix_scan: bool        = False
 
         self.frame = ttk.Frame(notebook)
         icon   = _TAB_ICONS.get(title, "")
@@ -1874,11 +1875,14 @@ class ScanTab:
             except Exception:
                 pass
 
-        # Sort visible cards and collapse INFO noise, then surface the overview.
+        # Sort visible cards and collapse INFO noise.
+        # Only jump to Overview on an explicit user-initiated scan, not post-fix rescans.
         self._pane.flush_info_group()
         if hasattr(self.app, "_tab_overview"):
             self.app._tab_overview.refresh()
-            self.app._nb.select(self.app._tab_overview.frame)
+            if not self._post_fix_scan:
+                self.app._nb.select(self.app._tab_overview.frame)
+        self._post_fix_scan = False
 
     def _finish_fix(self, success: bool):
         self.app.set_gull_fixing(False)
@@ -1887,9 +1891,9 @@ class ScanTab:
         self._pane.set_fix_btn_state(True)
         self._refresh_btns()
         if success:
-            self.app._set_status("Fixes applied — rescanning in 2s…")
-            self.app._log_append("\nFixes applied. Rescanning now…\n", "ok")
-            self.frame.after(2000, self.start_scan)
+            self.app._set_status("Fixes applied — rescanning all tabs in 2s…")
+            self.app._log_append("\nFixes applied. Rescanning all tabs…\n", "ok")
+            self.frame.after(2000, self.app._rescan_populated_tabs)
         else:
             self.app._set_status("Some fixes failed — check Scan activity.")
 
@@ -2175,10 +2179,7 @@ class OverviewTab:
         self.refresh()
 
     def _rescan_tabs_with_data(self):
-        for attr, _, _ in self._TAB_COLS:
-            tab = getattr(self._app, attr, None)
-            if tab and getattr(tab, "_findings", []):
-                tab.start_scan()
+        self._app._rescan_populated_tabs()
 
 
 # ── Snapshots tab ──────────────────────────────────────────────────────────────
@@ -3731,6 +3732,19 @@ class App:
         ec.check_startup(reporter)
 
     # ── Shared helpers ────────────────────────────────────────────────────────
+
+    def _rescan_populated_tabs(self):
+        """Rescan every ScanTab that already has findings (post-fix rescan).
+
+        Sets _post_fix_scan so each tab stays on its own page when done instead
+        of jumping to the Overview tab.
+        """
+        for tab in (self._tab_security, self._tab_antivirus,
+                    self._tab_performance, self._tab_protection,
+                    self._tab_cleaner):
+            if getattr(tab, "_findings", []):
+                tab._post_fix_scan = True
+                tab.start_scan()
 
     def _get_active_tab(self) -> ScanTab:
         for tab in (self._tab_security, self._tab_antivirus,
