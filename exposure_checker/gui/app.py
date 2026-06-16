@@ -4618,7 +4618,6 @@ def _show_splash(root):
 
 def main():
     if "--smoke" in sys.argv:
-        import exposure_checker as ec
         from exposure_checker import _core, _remediate, _storage, _report, _schedule, _notify, _cli
         from exposure_checker.checks import (
             security, performance, cleaner, portscan, benchmark, overclock,
