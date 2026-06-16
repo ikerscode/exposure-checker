@@ -74,6 +74,21 @@ def _shade(c, k):
     return (_clamp(c[0] * k), _clamp(c[1] * k), _clamp(c[2] * k))
 
 
+def _silhouette(c, fog):
+    """Backlit facade: blend the plaster colour toward a cool shadow and dim it.
+
+    With the sun setting at the end of the canal the buildings face away from the
+    light, so they read as dark, slightly warm silhouettes with glowing windows —
+    the dramatic 'contre-jour' look of real sunset-canal photography.
+    """
+    sh = (24, 20, 34)
+    k = 0.60
+    mixed = (c[0] * (1 - k) + sh[0] * k,
+             c[1] * (1 - k) + sh[1] * k,
+             c[2] * (1 - k) + sh[2] * k)
+    return _shade(mixed, max(0.32, fog * 0.7))
+
+
 # Sunset gradient (zenith → horizon)
 _SKY = [
     (0.00, (8, 12, 44)),
@@ -145,12 +160,13 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
         })
 
     # ── Venice canal geometry (one-point perspective) ─────────────────────────
-    F = 270.0 * SS
-    CW = 2.5
-    CAM_H = 1.45
+    F = 250.0 * SS
+    CW = 3.1                # wider canal — less claustrophobic "tunnel" feel
+    CAM_H = 1.4
     NEAR = 1.0
     FAR = 32.0
     SPEED = 2.7
+    SUN_FRAC = 0.40         # horizontal sun position (0=left, 1=right)
 
     def proj(x, y, z):
         s = F / z
@@ -207,9 +223,11 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
                 continue
         return pygame.font.Font(None, size)
 
-    f_title = _font(int(36 * SS), bold=True)
-    f_sub = _font(int(12 * SS), bold=False)
-    f_small = _font(int(9 * SS), bold=False)
+    # Titles render on the window surface (not the supersampled scene), so they
+    # must be window-scale, NOT multiplied by SS.
+    f_title = _font(32, bold=True)
+    f_sub = _font(13, bold=False)
+    f_small = _font(10, bold=False)
 
     stages = [
         (0.00, "Detecting platform and loading base configuration…"),
@@ -248,34 +266,34 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
         except Exception:
             pygame.draw.circle(surf, col, (x, y), r)
 
-    def _gull(surf, cx, cy, flap, scale, body, wing, tip, alpha=255):
+    def _gull(surf, cx, cy, flap, scale, col, alpha=255):
+        """A seagull in flight as a single silhouette: the classic shallow-'M'
+        with a bent 'wrist' and pointed tips. ``flap`` in [-1,1] raises/lowers
+        the wings."""
         cx, cy = int(cx), int(cy)
-        span = int(50 * scale * SS)
-        sweep = int((14 + flap * 22) * scale * SS)
+        s = scale * SS
+        lift = (5 + flap * 13) * s            # wing height (flap)
+        wrist = 17 * s                        # distance out to the wrist bend
+        tipd = 42 * s                         # distance out to the wing tip
         for side in (-1, 1):
-            wing_pts = [
-                (cx, cy + int(2 * scale * SS)),
-                (cx + side * int(span * 0.42), cy - int(sweep * 0.82)),
-                (cx + side * span, cy - sweep),
-                (cx + side * int(span * 0.96), cy - sweep + int(6 * scale * SS)),
-                (cx + side * int(span * 0.5), cy + int(5 * scale * SS)),
+            pts = [
+                (cx, cy + 3 * s),                              # under the body
+                (cx + side * 6 * s, cy - lift * 0.45),         # inner wing, rising
+                (cx + side * wrist, cy - lift),                # wrist (high point)
+                (cx + side * tipd, cy - lift * 0.30),          # pointed tip, lower
+                (cx + side * tipd * 0.96, cy - lift * 0.12),   # tip underside
+                (cx + side * wrist * 0.92, cy - lift * 0.5),   # wrist underside
+                (cx + side * 5 * s, cy + 1 * s),               # back toward body
             ]
-            _poly(surf, wing_pts, wing, alpha)
-            tip_pts = [
-                (cx + side * int(span * 0.78), cy - sweep + int(2 * scale * SS)),
-                (cx + side * span, cy - sweep),
-                (cx + side * int(span * 0.96), cy - sweep + int(6 * scale * SS)),
-            ]
-            _poly(surf, tip_pts, tip, alpha)
+            _poly(surf, [(int(px), int(py)) for px, py in pts], col, alpha)
+        # slim body + small head nub
         _poly(surf, [
-            (cx - int(4 * scale * SS), cy + int(8 * scale * SS)),
-            (cx + int(4 * scale * SS), cy + int(8 * scale * SS)),
-            (cx, cy + int(15 * scale * SS)),
-        ], wing, alpha)
-        _disc(surf, cx, cy + int(3 * scale * SS), max(2, int(7 * scale * SS)),
-              body, alpha)
-        _disc(surf, cx, cy - int(7 * scale * SS), max(1, int(3 * scale * SS)),
-              body, alpha)
+            (cx - int(2.4 * s), cy),
+            (cx + int(2.4 * s), cy),
+            (cx + int(1.4 * s), cy + int(9 * s)),
+            (cx - int(1.4 * s), cy + int(9 * s)),
+        ], col, alpha)
+        _disc(surf, cx, cy - int(2 * s), max(1, int(2.2 * s)), col, alpha)
 
     # ── Pre-computed numpy masks for post-processing ──────────────────────────
     if have_np:
@@ -288,11 +306,25 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
         n_water_w = BASE_H - HZ_w
         w_ys_w = np.arange(n_water_w)
         w_xs_w = np.arange(BASE_W)
-        sun_cx_w = BASE_W // 2
+        sun_cx_w = int(BASE_W * SUN_FRAC)
 
         def _aces(x):
             return np.clip((x * (2.51 * x + 0.03)) /
                            (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0)
+
+    # Debug: GULLWING_SPLASH_DUMP="path.png@0.6" saves one frame at the given
+    # progress and exits. Harmless in production (env var unset).
+    dump_path, dump_at, dumped = None, 0.6, False
+    _dump = os.environ.get("GULLWING_SPLASH_DUMP")
+    if _dump:
+        if "@" in _dump:
+            dump_path, _a = _dump.rsplit("@", 1)
+            try:
+                dump_at = float(_a)
+            except ValueError:
+                pass
+        else:
+            dump_path = _dump
 
     clock = pygame.time.Clock()
     start = pygame.time.get_ticks()
@@ -327,27 +359,22 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
             bb = _clamp(b * tw)
             scene.set_at((sx, sy), (bb, bb, _clamp(bb + 20)))
 
-        # Sun core + halo on glow
-        sun_x, sun_y = W // 2, HZ - int(8 * SS)
-        for rr, col, a in ((int(120 * SS), (255, 120, 50), 38),
-                           (int(78 * SS), (255, 150, 60), 70),
-                           (int(50 * SS), (255, 184, 92), 130),
-                           (int(30 * SS), (255, 224, 150), 200),
-                           (int(17 * SS), (255, 247, 214), 255)):
+        # Sun — small, soft, warm, sitting just above the horizon and offset
+        # from centre so its bright water-reflection column doesn't fall behind
+        # the centred title text. Drawn straight onto the scene (not the bloom
+        # layer) so it can't blow out to a white supernova.
+        sun_x, sun_y = int(W * SUN_FRAC), HZ - int(10 * SS)
+        for rr, col in ((int(58 * SS), (150, 70, 48)),
+                        (int(40 * SS), (196, 96, 52)),
+                        (int(26 * SS), (236, 138, 66)),
+                        (int(16 * SS), (252, 186, 110)),
+                        (int(9 * SS), (255, 226, 168))):
             try:
-                gfxdraw.filled_circle(glow, sun_x, sun_y, rr, (*col, a))
+                gfxdraw.filled_circle(scene, sun_x, sun_y, rr, col)
             except Exception:
-                pygame.draw.circle(glow, col, (sun_x, sun_y), rr)
-
-        # Volumetric god-rays radiating from the sun
-        for k in range(14):
-            ang = (k / 14) * math.pi * 2 + t * 0.05
-            ln = (180 + 60 * math.sin(t * 0.7 + k)) * SS
-            ex = sun_x + math.cos(ang) * ln
-            ey = sun_y + math.sin(ang) * ln * 0.6
-            wdt = max(1, int(2 * SS))
-            pygame.draw.line(glow, (255, 170, 90, 16),
-                             (sun_x, sun_y), (ex, ey), wdt)
+                pygame.draw.circle(scene, col, (sun_x, sun_y), rr)
+        # A gentle bloom seed for the sun core only
+        gfxdraw.filled_circle(glow, sun_x, sun_y, int(14 * SS), (255, 210, 150, 150))
 
         # Clouds (dark top, warm-lit underbelly)
         for cl in clouds:
@@ -400,42 +427,47 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
                 bx1, by1, _ = proj(x, 0, z1)
                 tx0, ty0, _ = proj(x, bh, z0)
                 tx1, ty1, _ = proj(x, bh, z1)
-                # sun-side facades catch warm light; shadow-side cooler
-                lit_k = 1.06 if side == 1 else 0.9
-                fc = _shade(fac, fog * lit_k)
+                # Dark backlit silhouette
+                fc = _silhouette(fac, fog)
                 pygame.draw.polygon(scene, fc, [(bx0, by0), (bx1, by1),
                                                 (tx1, ty1), (tx0, ty0)])
-                # Vertical shading: darker facade near the waterline (ambient occ.)
-                mx0, my0, _ = proj(x, bh * 0.4, z0)
-                mx1, my1, _ = proj(x, bh * 0.4, z1)
-                pygame.draw.polygon(scene, _shade(fac, fog * lit_k * 0.66),
-                                    [(bx0, by0), (bx1, by1), (mx1, my1), (mx0, my0)])
-                # Rooftop cornice
-                pygame.draw.line(scene, _shade(fac, fog * 0.5),
+                # Rooftop catches a thin rim of sky light
+                pygame.draw.line(scene, _shade(fc, 1.7),
                                  (tx0, ty0), (tx1, ty1), max(1, SS))
-                # Limestone waterline band
-                sx0, sy0, _ = proj(x, 0.5, z0)
-                sx1, sy1, _ = proj(x, 0.5, z1)
-                pygame.draw.polygon(scene, _shade(_STONE, fog * 0.85),
+                # Faint limestone waterline (kept subtle so the silhouette holds)
+                sx0, sy0, _ = proj(x, 0.4, z0)
+                sx1, sy1, _ = proj(x, 0.4, z1)
+                pygame.draw.polygon(scene, _shade(_STONE, fog * 0.4),
                                     [(bx0, by0), (bx1, by1), (sx1, sy1), (sx0, sy0)])
-                # Recessed warm windows (+ glow)
-                if lit and z0 < 22:
-                    for ri in range(rows):
-                        wy_w = bh * (0.28 + 0.24 * ri / max(1, rows))
+                # Rows of warm windows up the facade — the key "this is a
+                # building" cue. Drawn solid on the scene (so they read even with
+                # bloom dialled down) plus a small bloom seed on the glow layer.
+                if lit and z0 < 26:
+                    nrows = rows + 2
+                    for ri in range(nrows):
+                        wy_w = bh * (0.22 + 0.62 * ri / max(1, nrows))
                         for ci in range(cols):
                             wz = z0 + (z1 - z0) * ((ci + 0.5) / cols)
                             wpx, wpy, ws = proj(x, wy_w, wz)
-                            wr = max(1, int(ws * 0.085))
+                            wr = max(1, int(ws * 0.07))
+                            wh2 = max(1, int(wr * 1.7))
                             # dark recess frame
-                            pygame.draw.rect(scene, _shade((30, 18, 12), fog),
-                                             (int(wpx - wr - 1), int(wpy - wr - 1),
-                                              wr * 2 + 2, int(wr * 1.9) + 2))
-                            warm = (255, 208, 110) if (ri + ci) % 2 == 0 \
-                                else (255, 176, 70)
-                            a = _clamp(220 * fog)
-                            pygame.draw.rect(glow, (*warm, a),
-                                             (int(wpx - wr), int(wpy - wr),
-                                              wr * 2, int(wr * 1.8)))
+                            pygame.draw.rect(scene, _shade((22, 15, 12), fog),
+                                             (int(wpx - wr - 1), int(wpy - wh2 - 1),
+                                              wr * 2 + 2, wh2 + 2))
+                            # not every window is lit — gives life/variation
+                            if (ri * 7 + ci * 3 + seg["lrows"]) % 5 == 0:
+                                pane = _shade((40, 44, 60), fog)   # dark pane
+                            else:
+                                warm = (255, 206, 120) if (ri + ci) % 2 == 0 \
+                                    else (250, 176, 84)
+                                pane = _shade(warm, min(1.0, fog * 1.08))
+                                pygame.draw.rect(
+                                    glow, (*warm, _clamp(140 * fog)),
+                                    (int(wpx - wr), int(wpy - wh2), wr * 2, wh2))
+                            pygame.draw.rect(scene, pane,
+                                             (int(wpx - wr), int(wpy - wh2),
+                                              wr * 2, wh2))
             # Striped mooring pole
             if seg["pole"] and z0 < 16:
                 px = seg["pside"] * (hw - 0.3)
@@ -468,40 +500,37 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
                                  (gsx - int(gw * 0.2), gsy - gh * 5),
                                  max(1, int(gs * 0.02)))
 
-        # Horizon haze
-        haze = pygame.Surface((W, int(40 * SS)), pygame.SRCALPHA)
-        for i in range(int(40 * SS)):
-            aa = int(70 * (1 - i / (40 * SS)))
-            pygame.draw.line(haze, (255, 150, 90, aa), (0, i), (W, i))
-        scene.blit(haze, (0, HZ - int(20 * SS)))
+        # Horizon haze (soft, low — gives atmospheric depth without a hard band)
+        haze = pygame.Surface((W, int(46 * SS)), pygame.SRCALPHA)
+        for i in range(int(46 * SS)):
+            tnorm = i / (46 * SS)
+            aa = int(46 * (1 - abs(tnorm - 0.5) * 2))   # peak in the middle
+            pygame.draw.line(haze, (255, 158, 100, aa), (0, i), (W, i))
+        scene.blit(haze, (0, HZ - int(23 * SS)))
 
-        # ── Seagulls gliding down the canal (large + prominent) ───────────────
-        flap = math.sin(t * 2.6 * 2 * math.pi)
-        cx0 = W / 2 + math.sin(t * 0.7) * 80 * SS
-        cy0 = HZ - 104 * SS + math.sin(t * 1.5) * 18 * SS
+        # ── Seagulls gliding down the canal toward the sunset ─────────────────
+        # Dark backlit silhouettes — the iconic "gull at sunset" — with a hero
+        # bird close to camera and the flock receding toward the vanishing point.
+        flap = math.sin(t * 2.4 * 2 * math.pi)
+        gull_col = (26, 22, 30)
+        cx0 = W * 0.53 + math.sin(t * 0.6) * 55 * SS
+        cy0 = HZ - 86 * SS + math.sin(t * 1.3) * 13 * SS
         formation = [
-            (cx0, cy0, 1.7, 255),
-            (cx0 - 120 * SS + math.sin(t * 0.8) * 22 * SS,
-             cy0 + 36 * SS + math.sin(t * 1.2) * 11 * SS, 1.15, 255),
-            (cx0 + 134 * SS + math.sin(t * 0.6 + 2) * 19 * SS,
-             cy0 + 22 * SS + math.sin(t * 1.1 + 1) * 10 * SS, 1.0, 255),
-            (cx0 - 50 * SS + math.sin(t * 0.9 + 1) * 15 * SS,
-             cy0 - 38 * SS + math.sin(t * 1.4) * 9 * SS, 0.72, 240),
+            (cx0, cy0, 1.95, 255),                                         # hero
+            (cx0 - 104 * SS + math.sin(t * 0.8) * 18 * SS,
+             cy0 - 34 * SS + math.sin(t * 1.2) * 9 * SS, 0.9, 255),
+            (cx0 + 92 * SS + math.sin(t * 0.7 + 2) * 16 * SS,
+             cy0 - 18 * SS + math.sin(t * 1.0 + 1) * 8 * SS, 0.62, 255),
+            (cx0 - 24 * SS + math.sin(t * 0.9 + 1) * 12 * SS,
+             cy0 - 58 * SS + math.sin(t * 1.4) * 7 * SS, 0.40, 255),       # far
         ]
-        # motion-blur ghost of the previous frame's positions
+        # faint motion-blur ghost of the previous frame for a sense of speed
         if prev_formation[0]:
             for gx, gy, sc, al in prev_formation[0]:
-                _gull(glow, gx, gy, flap, sc, (255, 255, 255),
-                      (236, 244, 252), (210, 224, 238), int(al * 0.22))
+                _gull(scene, gx, gy, flap, sc, gull_col, 60)
         prev_formation[0] = formation
-        # Glow halo pass
         for gx, gy, sc, al in formation:
-            _gull(glow, gx, gy, flap, sc, (255, 255, 255),
-                  (236, 244, 252), (210, 224, 238), int(al * 0.7))
-        # Crisp birds (white body, dark slate wingtips) on the scene
-        for gx, gy, sc, al in formation:
-            _gull(scene, gx, gy, flap, sc, (248, 250, 253),
-                  (216, 228, 242), (52, 64, 84), al)
+            _gull(scene, gx, gy, flap, sc, gull_col, al)
 
         # Embers on glow
         for e in embers:
@@ -520,24 +549,6 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
 
         # ── Bloom composite ───────────────────────────────────────────────────
         scene.blit(_bloom(glow), (0, 0), special_flags=pygame.BLEND_RGB_ADD)
-        scene.blit(glow, (0, 0), special_flags=pygame.BLEND_RGB_ADD)
-
-        # ── Lens flare ghosts along the sun→centre axis ───────────────────────
-        cxs, cys = W / 2, H / 2
-        dxf, dyf = (cxs - sun_x), (cys - sun_y)
-        flare = pygame.Surface((W, H), pygame.SRCALPHA)
-        for fk, (fr, fcol, fa) in enumerate((
-                (26 * SS, (120, 200, 255), 26), (16 * SS, (255, 180, 120), 30),
-                (40 * SS, (180, 140, 255), 18), (10 * SS, (255, 240, 180), 40),
-                (22 * SS, (120, 255, 200), 16))):
-            fpos = (int(sun_x + dxf * (0.4 + fk * 0.34)),
-                    int(sun_y + dyf * (0.4 + fk * 0.34)))
-            try:
-                gfxdraw.filled_circle(flare, fpos[0], fpos[1], int(fr),
-                                      (*fcol, fa))
-            except Exception:
-                pass
-        scene.blit(flare, (0, 0), special_flags=pygame.BLEND_RGB_ADD)
 
         # ── Downsample to window (supersampled AA) ────────────────────────────
         pygame.transform.smoothscale(scene, (BASE_W, BASE_H), screen)
@@ -575,6 +586,14 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
             ov.fill((3, 2, 12))
             ov.set_alpha(a)
             screen.blit(ov, (0, 0))
+
+        if dump_path and not dumped and progress >= dump_at:
+            try:
+                pygame.image.save(screen, dump_path)
+            except Exception:
+                pass
+            dumped = True
+            running = False
 
         pygame.display.flip()
         clock.tick(45)
@@ -634,8 +653,8 @@ def _reflect_simple(pygame, scene, W, H, HZ):
 def _post_np(np, pygame, screen, W, H, vignette, edge_mask, aces):
     arr = pygame.surfarray.pixels3d(screen)         # (W, H, 3) uint8 view
     f = arr.astype(np.float32) / 255.0
-    # Filmic tone-map with a touch of exposure
-    f = aces(f * 1.12)
+    # Filmic tone-map (no extra exposure — the scene was over-bright)
+    f = aces(f * 0.98)
     # Colour grade: lift shadows slightly cool, warm the highlights
     luma = f[..., 0] * 0.299 + f[..., 1] * 0.587 + f[..., 2] * 0.114
     warm = np.clip((luma - 0.55) * 1.6, 0, 1)[..., None]
@@ -650,8 +669,8 @@ def _post_np(np, pygame, screen, W, H, vignette, edge_mask, aces):
     b_sh = np.roll(b, -1, axis=0)
     f[..., 0] = r * (1 - edge_mask) + r_sh * edge_mask
     f[..., 2] = b * (1 - edge_mask) + b_sh * edge_mask
-    # Film grain
-    f += (np.random.rand(W, H, 1).astype(np.float32) - 0.5) * 0.035
+    # Film grain (subtle)
+    f += (np.random.rand(W, H, 1).astype(np.float32) - 0.5) * 0.016
     np.clip(f, 0, 1, out=f)
     arr[:] = (f * 255).astype(np.uint8)
     del arr
@@ -661,28 +680,33 @@ def _post_np(np, pygame, screen, W, H, vignette, edge_mask, aces):
 
 def _draw_titles(pygame, screen, W, H, f_title, f_sub, f_small,
                  progress, stages, version):
-    ty = H - 92
-    title = f_title.render("GULLWING", True, (236, 242, 250))
-    shadow = f_title.render("GULLWING", True, (3, 5, 11))
+    # Dark gradient scrim across the bottom so text is always legible over the
+    # water reflection / sun glitter — this is what fixes "text blocked by the
+    # sun and gulls". Built fresh (cheap) each call.
+    band = 132
+    scrim = pygame.Surface((W, band), pygame.SRCALPHA)
+    for i in range(band):
+        a = int(195 * (i / band) ** 1.5)
+        pygame.draw.line(scrim, (4, 7, 16, a), (0, i), (W, i))
+    screen.blit(scrim, (0, H - band))
+
+    # Title — clean white with a soft drop shadow (no oversized glow)
+    title = f_title.render("GULLWING", True, (238, 244, 252))
+    shadow = f_title.render("GULLWING", True, (2, 4, 10))
+    ty = H - 86
     tx = W // 2 - title.get_width() // 2
-    screen.blit(shadow, (tx + 2, ty + 2))
-    # cyan glow halo
-    tg = f_title.render("GULLWING", True, (0, 150, 200)).convert_alpha()
-    tw, th = tg.get_size()
-    blurred = pygame.transform.smoothscale(
-        pygame.transform.smoothscale(tg, (max(1, tw // 6), max(1, th // 6))),
-        (tw, th))
-    screen.blit(blurred, (tx, ty), special_flags=pygame.BLEND_RGB_ADD)
+    screen.blit(shadow, (tx + 1, ty + 2))
     screen.blit(title, (tx, ty))
 
     sub = f_sub.render(
-        "Tune it.  Lock it.  Send it.  —  100% local, nothing leaves your machine",
-        True, (150, 166, 186))
-    screen.blit(sub, (W // 2 - sub.get_width() // 2, ty + 40))
+        "Tune it.  ·  Lock it.  ·  Send it.",
+        True, (170, 184, 202))
+    screen.blit(sub, (W // 2 - sub.get_width() // 2,
+                      ty + title.get_height() + 6))
 
-    bar_w, bar_h = 320, 6
+    bar_w, bar_h = 300, 5
     bx = W // 2 - bar_w // 2
-    by = ty + 60
+    by = H - 26
     pygame.draw.rect(screen, (13, 24, 36), (bx, by, bar_w, bar_h),
                      border_radius=bar_h // 2)
     filled = int(bar_w * progress)
