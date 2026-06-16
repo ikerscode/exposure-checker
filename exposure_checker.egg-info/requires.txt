@@ -1,5 +1,0 @@
-cryptography>=38
-
-[dev]
-pytest>=7
-pytest-mock>=3

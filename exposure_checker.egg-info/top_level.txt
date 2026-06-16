@@ -1,2 +1,0 @@
-exposure_checker
-exposure_checker_ui

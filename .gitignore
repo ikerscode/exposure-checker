@@ -23,9 +23,15 @@ results/
 *.report
 scan-*.json
 scan-*.html
+report-*.pdf
 *.log
 
 # Python build artifacts
 *.egg-info/
 __pycache__/
 *.pyc
+
+# Test & tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

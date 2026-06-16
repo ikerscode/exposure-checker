@@ -51,7 +51,7 @@ jobs:
         run: pip install -e .
 
       - name: Build app
-        run: pyinstaller gullwing.spec
+        run: pyinstaller packaging/gullwing.spec
 
       # ── macOS: wrap in .dmg ───────────────────────────────────────────────────
       - name: Package macOS .dmg

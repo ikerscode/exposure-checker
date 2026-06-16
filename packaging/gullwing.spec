@@ -1,14 +1,20 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec for Gullwing desktop app
+# PyInstaller spec for Gullwing desktop app.
+# Run from the repo root:  pyinstaller packaging/gullwing.spec
 
+import os
 import sys
 from PyInstaller.building.build_main import Analysis, PYZ, EXE, COLLECT, BUNDLE
 
 block_cipher = None
 
+# This spec lives in packaging/ — resolve paths from the repo root so it works
+# no matter what the current working directory is.
+ROOT = os.path.dirname(os.path.abspath(SPECPATH))
+
 a = Analysis(
-    ['gullwing_ui.py'],
-    pathex=[],
+    [os.path.join(ROOT, 'gullwing_ui.py')],
+    pathex=[ROOT],
     binaries=[],
     datas=[],
     hiddenimports=[
