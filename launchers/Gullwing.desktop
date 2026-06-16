@@ -1,5 +1,5 @@
 [Desktop Entry]
-Version=1.0.7
+Version=1.0.8
 Name=Gullwing
 Comment=Tune it. Lock it. Send it.
 Exec=bash -c 'python3 "$(dirname "$(dirname "$(realpath "%k")")")/gullwing_ui.py"'

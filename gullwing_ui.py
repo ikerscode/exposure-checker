@@ -1524,6 +1524,16 @@ class ScanTab:
             _show_fix_denied_dialog(self.app.root, findings)
             return
 
+        # Pre-flight: warn if disk is critically low
+        disk_warn = ec._remediate._check_disk_space(min_mb=50)
+        if disk_warn:
+            if not messagebox.askyesno(
+                "Low disk space",
+                f"⚠  {disk_warn}\n\nSome fixes write to disk and may fail. Continue anyway?",
+                parent=self.frame,
+            ):
+                return
+
         sudo_note = (
             "" if _is_root()
             else "\n\nYou will be asked for your password once for all fixes."
@@ -1585,8 +1595,12 @@ class ScanTab:
                 self._q.put(("log", (f"  ✗  {label}\n", "err")))
                 for _, rc, out in batch:
                     if rc != 0:
-                        detail = out.strip()[:200] if out.strip() else f"(exit code {rc})"
-                        self._q.put(("log", (f"      {detail}\n", "muted")))
+                        raw = out.strip()[:200] if out.strip() else f"(exit code {rc})"
+                        if "122" in raw or "quota exceeded" in raw.lower():
+                            raw = "disk quota exceeded — free up disk space before applying fixes"
+                        elif "no space left" in raw.lower():
+                            raw = "no space left on device — free up disk space before applying fixes"
+                        self._q.put(("log", (f"      {raw}\n", "muted")))
 
         self._q.put(("done_fix", failed == 0))
 
@@ -1953,6 +1967,804 @@ class SnapshotsTab:
         self.app._set_status("Snapshot deleted.")
 
 
+# ── Benchmark Tab ──────────────────────────────────────────────────────────────
+
+class BenchmarkTab:
+    """Animated medieval village flythrough + hardware benchmark."""
+
+    _TIERS = [
+        (90, "S", "#ffd700"), (75, "A", "#00e87a"), (60, "B", "#00d4ff"),
+        (45, "C", "#ffcc00"), (30, "D", "#ff8822"), (0,  "F", "#ff4455"),
+    ]
+
+    def __init__(self, nb, app):
+        self.frame = ttk.Frame(nb)
+        nb.add(self.frame, text="Benchmark")
+        self._app  = app
+        self._t    = 0.0
+        self._running     = False
+        self._bench_start = 0.0
+        self._frame_count = 0
+        self._results: dict = {}
+        self._build()
+        self._anim_tick()
+
+    def _build(self):
+        outer = tk.Frame(self.frame, bg=C["bg"])
+        outer.pack(fill=tk.BOTH, expand=True)
+
+        self._canvas = tk.Canvas(outer, bg="#05080f", highlightthickness=0, height=300)
+        self._canvas.pack(fill=tk.X)
+
+        # ── control bar ────────────────────────────────────────────────────────
+        ctrl = tk.Frame(outer, bg=C["panel"])
+        ctrl.pack(fill=tk.X)
+        self._status_lbl = tk.Label(ctrl, text="Press  ▶ RUN  to start  (~12 s)",
+                                    bg=C["panel"], fg=C["muted"],
+                                    font=("TkDefaultFont", 9))
+        self._status_lbl.pack(side=tk.LEFT, padx=12, pady=8)
+        self._run_btn = tk.Button(ctrl, text="▶  RUN BENCHMARK",
+                                  bg=C["accent"], fg=C["bg"],
+                                  font=("TkDefaultFont", 10, "bold"),
+                                  relief=tk.FLAT, padx=14, pady=5,
+                                  cursor="hand2", command=self._start)
+        self._run_btn.pack(side=tk.RIGHT, padx=12, pady=6)
+
+        # progress strip
+        self._prog = tk.Canvas(outer, bg=C["border"], height=3, highlightthickness=0)
+        self._prog.pack(fill=tk.X)
+
+        # ── result cards ────────────────────────────────────────────────────────
+        grid = tk.Frame(outer, bg=C["bg"])
+        grid.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+        metrics = [
+            ("cpu_hash",   "CPU Hash",    "SHA-256 throughput"),
+            ("cpu_float",  "CPU Float",   "Trig Mop/s"),
+            ("memory",     "Memory BW",   "Read/write bandwidth"),
+            ("disk",       "Disk Write",  "Sequential MB/s"),
+            ("render_fps", "Render FPS",  "Canvas frames/s"),
+        ]
+        self._result_vars: dict = {}
+        for i, (key, label, desc) in enumerate(metrics):
+            col, row = i % 2, i // 2
+            card = tk.Frame(grid, bg=C["panel"],
+                            highlightthickness=1, highlightbackground=C["border"])
+            card.grid(row=row, column=col, padx=4, pady=3, sticky="ew")
+            grid.grid_columnconfigure(col, weight=1)
+            tk.Label(card, text=label, bg=C["panel"], fg=C["text"],
+                     font=("TkDefaultFont", 9, "bold")).pack(anchor="w", padx=8, pady=(5,0))
+            tk.Label(card, text=desc, bg=C["panel"], fg=C["muted"],
+                     font=("TkDefaultFont", 7)).pack(anchor="w", padx=8)
+            vf = tk.Frame(card, bg=C["panel"])
+            vf.pack(fill=tk.X, padx=8, pady=(1,6))
+            val_v  = tk.StringVar(value="—")
+            tier_v = tk.StringVar(value="")
+            tk.Label(vf, textvariable=val_v, bg=C["panel"], fg=C["accent"],
+                     font=("TkFixedFont", 11, "bold")).pack(side=tk.LEFT)
+            tl = tk.Label(vf, textvariable=tier_v, bg=C["panel"],
+                          font=("TkDefaultFont", 11, "bold"))
+            tl.pack(side=tk.RIGHT)
+            self._result_vars[key] = (val_v, tier_v, tl)
+
+        total_card = tk.Frame(grid, bg=C["panel"],
+                              highlightthickness=1, highlightbackground=C["border"])
+        total_card.grid(row=3, column=0, columnspan=2, padx=4, pady=3, sticky="ew")
+        self._grade_lbl  = tk.Label(total_card, text="—", bg=C["panel"],
+                                    fg=C["muted"], font=("TkDefaultFont", 30, "bold"))
+        self._grade_lbl.pack(side=tk.LEFT, padx=14, pady=6)
+        sf = tk.Frame(total_card, bg=C["panel"])
+        sf.pack(side=tk.LEFT, pady=6)
+        tk.Label(sf, text="OVERALL", bg=C["panel"], fg=C["muted"],
+                 font=("TkDefaultFont", 7)).pack(anchor="w")
+        self._score_lbl = tk.Label(sf, text="—", bg=C["panel"], fg=C["text"],
+                                   font=("TkDefaultFont", 11, "bold"))
+        self._score_lbl.pack(anchor="w")
+
+    def _tier(self, score):
+        for min_s, label, color in self._TIERS:
+            if score >= min_s:
+                return label, color
+        return "F", "#ff4455"
+
+    def _start(self):
+        if self._running:
+            return
+        self._running     = True
+        self._frame_count = 0
+        self._bench_start = time.time()
+        self._results     = {}
+        self._run_btn.configure(state=tk.DISABLED, text="Running…")
+        self._status_lbl.configure(text="Benchmarking…", fg=C["accent"])
+        for _, (vv, tv, tl) in self._result_vars.items():
+            vv.set("…"); tv.set("")
+        self._grade_lbl.configure(text="…", fg=C["muted"])
+        self._score_lbl.configure(text="…")
+        threading.Thread(target=self._bench_thread, daemon=True).start()
+
+    def _post(self, key, text, score):
+        label, color = self._tier(score)
+        def _up():
+            if key in self._result_vars:
+                vv, tv, tl = self._result_vars[key]
+                vv.set(text)
+                tv.set(f"  {label}")
+                tl.configure(fg=color)
+            self._results[key] = score
+            self._update_total()
+        self.frame.after(0, _up)
+
+    def _update_total(self):
+        if not self._results:
+            return
+        avg = sum(self._results.values()) / len(self._results)
+        label, color = self._tier(avg)
+        self._grade_lbl.configure(text=label, fg=color)
+        self._score_lbl.configure(text=f"Score  {avg:.0f} / 100")
+
+    def _bench_thread(self):
+        import hashlib, tempfile
+
+        def upd(msg):
+            self.frame.after(0, lambda: self._status_lbl.configure(text=msg))
+
+        # CPU hash (~3 s)
+        upd("CPU hash benchmark…")
+        t0 = time.time(); n = 0; chunk = b"x" * 4096
+        while time.time() - t0 < 3.0:
+            hashlib.sha256(chunk).digest(); n += 1
+        rate = n * 4096 / 3.0 / 1e6
+        self._post("cpu_hash", f"{rate:.0f} MB/s", min(100, int(rate / 12)))
+
+        # CPU float (~2 s)
+        upd("CPU float benchmark…")
+        t0 = time.time(); n = 0
+        while time.time() - t0 < 2.0:
+            for j in range(500):
+                math.sin(n * 0.001) * math.cos(n * 0.002)
+            n += 500
+        rate_m = n / 2.0 / 1e6
+        self._post("cpu_float", f"{rate_m:.1f} Mop/s", min(100, int(rate_m / 2)))
+
+        # Memory (~2 s)
+        upd("Memory bandwidth benchmark…")
+        buf = bytearray(64 * 1024 * 1024)
+        t0 = time.time(); nb = 0
+        while time.time() - t0 < 2.0:
+            memoryview(buf)[0] = 1; _ = memoryview(buf)[-1]
+            nb += len(buf)
+        rate_gb = nb / (time.time() - t0) / 1e9
+        self._post("memory", f"{rate_gb:.1f} GB/s", min(100, int(rate_gb / 0.3)))
+
+        # Disk (~2 s)
+        upd("Disk write benchmark…")
+        total_b = 0; t_total = 0.001
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".gwbench") as f:
+                fname = f.name; chunk_d = b"G" * (256 * 1024)
+                t0 = time.time()
+                while time.time() - t0 < 2.0:
+                    f.write(chunk_d); total_b += len(chunk_d)
+                t_total = time.time() - t0
+            os.unlink(fname)
+        except OSError:
+            pass
+        rate_mb = total_b / t_total / 1e6
+        self._post("disk", f"{rate_mb:.0f} MB/s", min(100, int(rate_mb / 5)))
+
+        # Render FPS (frames we drew while benchmarking)
+        elapsed = time.time() - self._bench_start
+        fps = self._frame_count / max(elapsed, 1)
+        self._post("render_fps", f"{fps:.1f} FPS", min(100, int(fps / 0.55)))
+
+        def _done():
+            self._running = False
+            self._run_btn.configure(state=tk.NORMAL, text="▶  RUN BENCHMARK")
+            self._status_lbl.configure(text="Benchmark complete.", fg=C["ok"])
+            self._prog.delete("all")
+        self.frame.after(0, _done)
+
+    # ── Village scene ─────────────────────────────────────────────────────────
+
+    def _anim_tick(self):
+        try:
+            self._draw_village(self._t)
+            self._t += 0.016
+            if self._running:
+                self._frame_count += 1
+                elapsed = time.time() - self._bench_start
+                frac = min(1.0, elapsed / 11.0)
+                w = self._prog.winfo_width() or 800
+                self._prog.delete("all")
+                self._prog.create_rectangle(0, 0, int(w * frac), 3,
+                                            fill=C["accent"], outline="")
+        except Exception:
+            pass
+        self.frame.after(33, self._anim_tick)
+
+    def _draw_village(self, t):
+        c = self._canvas
+        W = c.winfo_width()  or 800
+        H = c.winfo_height() or 300
+        c.delete("all")
+
+        # Sky gradient bands
+        sky = ["#05080f","#06091a","#070b22","#090e2a","#0b1132"]
+        bh  = (H * 0.65) / len(sky)
+        for i, col in enumerate(sky):
+            c.create_rectangle(0, i*bh, W, (i+1)*bh, fill=col, outline="")
+
+        # Stars
+        rng = random.Random(42)
+        for _ in range(90):
+            sx = rng.randint(0, W); sy = rng.randint(0, int(H * 0.58))
+            tw = 0.5 + 0.5 * math.sin(t * 2.1 + sx * 0.13)
+            br = int(100 + 155 * tw)
+            br2 = min(255, br + 30)
+            c.create_oval(sx-1, sy-1, sx+1, sy+1,
+                          fill=f"#{br:02x}{br:02x}{br2:02x}", outline="")
+
+        # Moon
+        mx, my = W * 0.82, H * 0.13
+        for r, col in [(34,"#110e08"),(28,"#1a1608")]:
+            c.create_oval(mx-r, my-r, mx+r, my+r, fill="", outline=col, width=4)
+        c.create_oval(mx-22, my-22, mx+22, my+22, fill="#e8e0c8", outline="")
+        c.create_oval(mx+4,  my-7,  mx+11, my,    fill="#d0c8b0", outline="")
+        c.create_oval(mx-8,  my+4,  mx+1,  my+11, fill="#d8d0b8", outline="")
+
+        horiz_y = H * 0.60
+
+        # Ground
+        c.create_rectangle(0, horiz_y, W, H, fill="#050a05", outline="")
+
+        # Distant hills layer 1
+        off1 = (t * 5) % W
+        for ox in (-W, 0, W):
+            pts = []
+            for xi in range(0, W+20, 18):
+                hx = xi + ox - off1
+                hy = horiz_y - 42 - 26*math.sin((xi+ox)*0.007+1.3)
+                pts += [hx, hy]
+            pts += [W+ox, horiz_y, ox-W, horiz_y]
+            if len(pts) >= 6:
+                c.create_polygon(pts, fill="#090f07", outline="")
+
+        # Distant hills layer 2
+        off2 = (t * 9) % W
+        for ox in (-W, 0, W):
+            pts = []
+            for xi in range(0, W+20, 18):
+                hx = xi + ox - off2
+                hy = horiz_y - 18 - 12*math.sin((xi+ox)*0.012+2.9)
+                pts += [hx, hy]
+            pts += [W+ox, horiz_y, ox-W, horiz_y]
+            if len(pts) >= 6:
+                c.create_polygon(pts, fill="#070c05", outline="")
+
+        c.create_line(0, horiz_y, W, horiz_y, fill="#1a3020", width=1)
+
+        # Castle
+        cx = W // 2
+        cy = int(horiz_y)
+        c.create_rectangle(cx-28, cy-88, cx+28, cy, fill="#040904", outline="")
+        for bx in range(cx-28, cx+20, 11):
+            c.create_rectangle(bx, cy-97, bx+7, cy-88, fill="#040904", outline="")
+        for sx in (-44, 44):
+            c.create_rectangle(cx+sx-13, cy-62, cx+sx+13, cy, fill="#040904", outline="")
+            for bx in range(cx+sx-13, cx+sx+7, 9):
+                c.create_rectangle(bx, cy-70, bx+6, cy-62, fill="#040904", outline="")
+        for wx, wy in ((cx-9, cy-62), (cx+9, cy-62), (cx-9, cy-38)):
+            c.create_rectangle(wx-3, wy-5, wx+3, wy+5, fill="#ffcc44", outline="")
+            c.create_oval(wx-9, wy-11, wx+9, wy+11, fill="", outline="#331e00", width=7)
+
+        # Moving buildings
+        boff = (t * 16) % (W * 2)
+        rng2 = random.Random(13)
+        for i in range(14):
+            bx = int((i * 130 - boff) % (W * 2) - 60)
+            bw = rng2.randint(26, 48); bh2 = rng2.randint(32, 68)
+            by = int(horiz_y) - bh2
+            c.create_rectangle(bx, by, bx+bw, int(horiz_y), fill="#050a04", outline="")
+            rp = [bx-4, by, bx+bw//2, by-15, bx+bw+4, by]
+            c.create_polygon(rp, fill="#040803", outline="")
+            for wxi in range(2):
+                for wyi in range(2):
+                    wx2 = bx+5+wxi*14; wy2 = by+7+wyi*15
+                    wc  = "#bb7700" if rng2.random() > 0.35 else "#0a1207"
+                    c.create_rectangle(wx2, wy2, wx2+6, wy2+8, fill=wc, outline="")
+
+        # Road (one-point perspective)
+        vpx, vpy = W//2, int(horiz_y)
+        near_hw = int(W * 0.18)
+        c.create_polygon(vpx-3, vpy, vpx+3, vpy,
+                          vpx+near_hw, H, vpx-near_hw, H,
+                          fill="#0b160a", outline="")
+        # Road dashes
+        for i in range(8):
+            frac = ((i/8) + (t*0.38) % (1/8)*8) % 1.0
+            p = frac**2
+            dy = vpy + (H-vpy)*p
+            dw = max(2, int(7*p)); dh = max(2, int(16*p))
+            c.create_rectangle(vpx-dw//2, dy-dh//2, vpx+dw//2, dy+dh//2,
+                                fill="#1a3318", outline="")
+
+        # Foreground trees
+        toff = (t * 32) % 260
+        for side in (-1, 1):
+            for i in range(5):
+                tx = W//2 + side*(int(W*0.28) + i*68 - int(toff))
+                ty = int(horiz_y) + 4
+                th = 55 + (i%3)*18
+                c.create_rectangle(tx-3, ty, tx+3, ty+18, fill="#180c00", outline="")
+                c.create_polygon(tx, ty-th, tx-16, ty, tx+16, ty,
+                                  fill="#021201", outline="")
+                c.create_polygon(tx, ty-th-8, tx-11, ty-int(th*0.38),
+                                  tx+11, ty-int(th*0.38), fill="#031402", outline="")
+
+        # Torches
+        for tx, ty in ((W//2-75, int(horiz_y)-4), (W//2+75, int(horiz_y)-4)):
+            fl  = 0.7 + 0.3*math.sin(t*8.4 + tx*0.11)
+            fl2 = 0.7 + 0.3*math.sin(t*6.8 + tx*0.21 + 1.1)
+            c.create_rectangle(tx-2, ty-18, tx+2, ty+8, fill="#2a1800", outline="")
+            for r, col in ((int(20*fl),"#180700"), (int(14*fl),"#380f00"),
+                           (int(9*fl2),"#bb3800"), (int(5*fl2),"#ff8800")):
+                c.create_oval(tx-r, ty-18-r, tx+r, ty-18+r, fill=col, outline="")
+
+        # Mist
+        for i, fc in enumerate(("#06100a","#071208","#091407","#0b1608")):
+            fy = int(horiz_y) - 3 + i*3
+            c.create_rectangle(0, fy, W, fy+4, fill=fc, outline="")
+
+        # Seagulls flying through the scene
+        for gi in range(3):
+            gx = (W * (0.2 + gi*0.3) + t * (28 + gi*9)) % (W + 80) - 40
+            gy = H * (0.18 + gi*0.09)
+            gfl = math.sin(t*5.1 + gi*2.1) - 0.25*math.sin(2*(t*5.1+gi*2.1))
+            _draw_gull_icon(c, gx, gy, flap=gfl, scale=0.25+gi*0.06,
+                            body="#cce0ee", wing="#aac8dc")
+
+        # HUD
+        if self._running:
+            elapsed = time.time() - self._bench_start
+            fps_live = self._frame_count / max(elapsed, 0.1)
+            c.create_text(8, 8, anchor="nw",
+                          text=f"FPS {fps_live:.0f}   {elapsed:.1f}s / 11s",
+                          fill=C["accent"], font=("TkFixedFont", 9))
+        elif not self._results:
+            c.create_text(W//2, H//2-14, text="GULLWING BENCHMARK",
+                          fill=C["accent"], font=("TkDefaultFont", 17, "bold"))
+            c.create_text(W//2, H//2+12, text="Press  ▶ RUN BENCHMARK  to begin",
+                          fill=C["muted"], font=("TkDefaultFont", 10))
+
+
+# ── Overclock Tab ──────────────────────────────────────────────────────────────
+
+class OverclockTab:
+    """Live hardware monitor + overclocking advisory panel."""
+
+    _RISK = (
+        "⚠  OVERCLOCKING RISK: Increasing clock speeds or voltages beyond factory\n"
+        "   specifications can permanently damage hardware, void warranties, cause\n"
+        "   data loss, and reduce component lifespan. Only proceed if you understand\n"
+        "   the risks fully. Gullwing never modifies clocks or voltages automatically."
+    )
+
+    def __init__(self, nb, app):
+        self.frame = ttk.Frame(nb)
+        nb.add(self.frame, text="Overclock")
+        self._app              = app
+        self._poll_id          = None
+        self._advisory         = []
+        self._meter_vals: dict = {}       # key → current float | None
+        self._oc_t             = 0.0      # animation clock
+        self._last_adv_key     = None     # fingerprint of last rendered advisory
+        self._build()
+        self._oc_anim_tick()
+        self._poll()
+
+    def _build(self):
+        outer = tk.Frame(self.frame, bg=C["bg"])
+        outer.pack(fill=tk.BOTH, expand=True)
+
+        # Risk banner
+        banner = tk.Frame(outer, bg="#3a0808")
+        banner.pack(fill=tk.X, padx=0, pady=0)
+        tk.Label(banner, text=self._RISK,
+                 bg="#3a0808", fg="#ff9090",
+                 font=("TkDefaultFont", 8),
+                 justify=tk.LEFT).pack(anchor="w", padx=12, pady=8)
+
+        # Main two-column layout
+        cols = tk.Frame(outer, bg=C["bg"])
+        cols.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+
+        # Left: live monitor
+        left = tk.Frame(cols, bg=C["bg"])
+        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0,6))
+
+        hdr_l = tk.Frame(left, bg=C["panel"])
+        hdr_l.pack(fill=tk.X, pady=(0,4))
+        tk.Label(hdr_l, text="  LIVE MONITOR",
+                 bg=C["panel"], fg=C["accent"],
+                 font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT, pady=6)
+        self._refresh_btn = tk.Button(hdr_l, text="⟳ Refresh",
+                                      bg=C["panel"], fg=C["muted"],
+                                      font=("TkDefaultFont", 8),
+                                      relief=tk.FLAT, cursor="hand2",
+                                      command=self._poll)
+        self._refresh_btn.pack(side=tk.RIGHT, padx=8)
+
+        self._meters_frame = tk.Frame(left, bg=C["bg"])
+        self._meters_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Define meters
+        self._meter_defs = [
+            ("cpu_freq",   "CPU Frequency",  "MHz",  5000, C["accent"]),
+            ("cpu_temp",   "CPU Temp",        "°C",   110,  C["HIGH"]),
+            ("gpu_freq",   "GPU Core Clock",  "MHz",  3000, C["neon"]),
+            ("gpu_temp",   "GPU Temp",        "°C",   110,  C["HIGH"]),
+            ("ram_freq",   "RAM Speed",       "MHz",  8000, C["ok"]),
+            ("fan_rpm",    "Fan Speed",       "RPM",  3000, C["MEDIUM"]),
+        ]
+        self._meter_labels: dict = {}
+        self._meter_bars:   dict = {}
+
+        for key, label, unit, max_val, color in self._meter_defs:
+            row = tk.Frame(self._meters_frame, bg=C["panel"],
+                           highlightthickness=1, highlightbackground=C["border"])
+            row.pack(fill=tk.X, pady=2)
+
+            name_lbl = tk.Label(row, text=label, bg=C["panel"], fg=C["muted"],
+                                 font=("TkDefaultFont", 8), width=16, anchor="w")
+            name_lbl.pack(side=tk.LEFT, padx=(8,0), pady=5)
+
+            bar_frame = tk.Frame(row, bg=C["bg"], height=14)
+            bar_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=4, padx=6)
+            bar_cnv = tk.Canvas(bar_frame, bg=C["bg"], height=14,
+                                highlightthickness=0)
+            bar_cnv.pack(fill=tk.X, expand=True)
+
+            val_lbl = tk.Label(row, text="—", bg=C["panel"], fg=color,
+                               font=("TkFixedFont", 9, "bold"), width=12, anchor="e")
+            val_lbl.pack(side=tk.RIGHT, padx=8, pady=5)
+
+            self._meter_labels[key] = (val_lbl, color, max_val)
+            self._meter_bars[key]   = (bar_cnv, color)
+
+        # Right: advisory panel
+        right = tk.Frame(cols, bg=C["bg"], width=260)
+        right.pack(side=tk.RIGHT, fill=tk.BOTH)
+        right.pack_propagate(False)
+
+        tk.Label(right, text="OC ADVISORY",
+                 bg=C["bg"], fg=C["accent"],
+                 font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=(0,4))
+
+        adv_outer = tk.Frame(right, bg=C["bg"],
+                             highlightthickness=1, highlightbackground=C["border"])
+        adv_outer.pack(fill=tk.BOTH, expand=True)
+
+        self._adv_canvas = tk.Canvas(adv_outer, bg=C["bg"],
+                                     highlightthickness=0)
+        adv_sb = ttk.Scrollbar(adv_outer, orient=tk.VERTICAL,
+                               command=self._adv_canvas.yview)
+        self._adv_canvas.configure(yscrollcommand=adv_sb.set)
+        adv_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._adv_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self._adv_inner = tk.Frame(self._adv_canvas, bg=C["bg"])
+        self._adv_win   = self._adv_canvas.create_window(
+            (0, 0), window=self._adv_inner, anchor="nw")
+        self._adv_inner.bind("<Configure>", self._on_adv_resize)
+        self._adv_canvas.bind("<Configure>", self._on_adv_canvas_resize)
+
+        # Placeholder until advisory loads
+        self._adv_status = tk.Label(self._adv_inner,
+                                    text="Click  ⟳ Refresh  to load advisory…",
+                                    bg=C["bg"], fg=C["muted"],
+                                    font=("TkDefaultFont", 8),
+                                    wraplength=220, justify=tk.LEFT)
+        self._adv_status.pack(anchor="w", padx=8, pady=8)
+
+    def _on_adv_resize(self, _e):
+        self._adv_canvas.configure(
+            scrollregion=self._adv_canvas.bbox("all"))
+
+    def _on_adv_canvas_resize(self, e):
+        self._adv_canvas.itemconfigure(self._adv_win, width=e.width)
+
+    @staticmethod
+    def _hex_to_rgb(hexcol):
+        return int(hexcol[1:3], 16), int(hexcol[3:5], 16), int(hexcol[5:7], 16)
+
+    def _update_meter(self, key, value):
+        if key not in self._meter_labels:
+            return
+        val_lbl, color, max_val = self._meter_labels[key]
+        self._meter_vals[key] = value
+        if value is None:
+            val_lbl.configure(text="N/A", fg=C["muted"])
+            return
+        unit = {"cpu_freq":"MHz","cpu_temp":"°C","gpu_freq":"MHz",
+                "gpu_temp":"°C","ram_freq":"MHz","fan_rpm":"RPM"}[key]
+        disp_color = color
+        if "temp" in key and value >= 90:
+            disp_color = C["CRITICAL"]
+        elif "temp" in key and value >= 75:
+            disp_color = C["HIGH"]
+        val_lbl.configure(text=f"{value:.0f} {unit}", fg=disp_color)
+
+    def _oc_anim_tick(self):
+        """30 fps glow-bar animation for the live monitor."""
+        try:
+            if not self.frame.winfo_exists():
+                return
+        except Exception:
+            return
+        self._oc_t = (self._oc_t + 0.055) % (2 * math.pi)
+        pulse = 0.80 + 0.20 * math.sin(self._oc_t)
+        for key, (val_lbl, color, max_val) in self._meter_labels.items():
+            bar_cnv, bar_color = self._meter_bars[key]
+            w = bar_cnv.winfo_width()
+            if w < 2:
+                continue
+            current_val = self._meter_vals.get(key)
+            bar_cnv.delete("all")
+            # Track background
+            bar_cnv.create_rectangle(0, 0, w, 14, fill="#050d18", outline="")
+            if current_val is None:
+                continue
+            frac = max(0.0, min(1.0, current_val / max_val))
+            filled = int(w * frac)
+            if filled < 1:
+                continue
+            try:
+                r, g, b = self._hex_to_rgb(bar_color)
+            except Exception:
+                continue
+            # Outer glow (dim, wide)
+            gr = min(255, int(r * 0.25))
+            gg = min(255, int(g * 0.25))
+            gb = min(255, int(b * 0.25))
+            bar_cnv.create_rectangle(0, 0, filled, 14,
+                                     fill=f"#{gr:02x}{gg:02x}{gb:02x}", outline="")
+            # Main bar with pulse
+            mr = min(255, int(r * pulse))
+            mg = min(255, int(g * pulse))
+            mb = min(255, int(b * pulse))
+            bar_cnv.create_rectangle(0, 3, filled, 11,
+                                     fill=f"#{mr:02x}{mg:02x}{mb:02x}", outline="")
+            # Top shine
+            sr = min(255, int(r * 1.5 * pulse))
+            sg = min(255, int(g * 1.5 * pulse))
+            sb = min(255, int(b * 1.5 * pulse))
+            bar_cnv.create_rectangle(0, 3, filled, 5,
+                                     fill=f"#{sr:02x}{sg:02x}{sb:02x}", outline="")
+            # Leading-edge glow dot
+            if filled > 4:
+                tr = min(255, int(r * 2.0))
+                tg = min(255, int(g * 2.0))
+                tb = min(255, int(b * 2.0))
+                bar_cnv.create_rectangle(
+                    max(0, filled - 5), 1, min(w, filled + 2), 13,
+                    fill=f"#{tr:02x}{tg:02x}{tb:02x}", outline=""
+                )
+        self.frame.after(33, self._oc_anim_tick)
+
+    def _read_hardware(self):
+        """Read live hardware metrics. Returns dict key→float|None."""
+        vals: dict = {k: None for k, *_ in self._meter_defs}
+
+        # CPU frequency
+        try:
+            if _UI_OS == "Linux":
+                freq_total = 0.0; n_cores = 0
+                for p in os.scandir("/sys/devices/system/cpu"):
+                    if not p.name.startswith("cpu") or not p.name[3:].isdigit():
+                        continue
+                    freq_f = os.path.join(p.path, "cpufreq", "scaling_cur_freq")
+                    try:
+                        with open(freq_f) as fh:
+                            freq_total += int(fh.read()) / 1000
+                        n_cores += 1
+                    except OSError:
+                        pass
+                if n_cores:
+                    vals["cpu_freq"] = freq_total / n_cores
+            elif _UI_OS == "Windows":
+                out, rc = ec._ps(
+                    "(Get-CimInstance Win32_Processor).CurrentClockSpeed")
+                if rc == 0 and out.strip().isdigit():
+                    vals["cpu_freq"] = float(out.strip())
+            elif _UI_OS == "Darwin":
+                out = subprocess.check_output(
+                    ["sysctl", "-n", "hw.cpufrequency"],
+                    timeout=3).decode().strip()
+                if out.isdigit():
+                    vals["cpu_freq"] = float(out) / 1e6
+        except Exception:
+            pass
+
+        # CPU temperature
+        try:
+            if _UI_OS == "Linux":
+                for tz in sorted(os.listdir("/sys/class/thermal")):
+                    tp = f"/sys/class/thermal/{tz}/temp"
+                    try:
+                        with open(tp) as fh:
+                            vals["cpu_temp"] = int(fh.read()) / 1000.0
+                        break
+                    except OSError:
+                        pass
+            elif _UI_OS == "Darwin":
+                pass  # requires sudo / SMC access
+        except Exception:
+            pass
+
+        # GPU (NVIDIA first, then AMD)
+        try:
+            out = subprocess.check_output(
+                ["nvidia-smi",
+                 "--query-gpu=clocks.gr,temperature.gpu",
+                 "--format=csv,noheader,nounits"],
+                timeout=4, stderr=subprocess.DEVNULL).decode().strip()
+            parts = [p.strip() for p in out.split(",")]
+            if len(parts) >= 2:
+                vals["gpu_freq"] = float(parts[0])
+                vals["gpu_temp"] = float(parts[1])
+        except Exception:
+            pass
+
+        if vals["gpu_freq"] is None:
+            try:
+                if _UI_OS == "Linux":
+                    for card in sorted(os.listdir("/sys/class/drm")):
+                        freq_f = f"/sys/class/drm/{card}/device/pp_dpm_sclk"
+                        if not os.path.exists(freq_f):
+                            continue
+                        with open(freq_f) as fh:
+                            for line in reversed(fh.read().splitlines()):
+                                if "*" in line:
+                                    m = re.search(r"(\d+)Mhz", line)
+                                    if m:
+                                        vals["gpu_freq"] = float(m.group(1))
+                                    break
+                        break
+            except Exception:
+                pass
+
+        if vals["gpu_temp"] is None:
+            try:
+                if _UI_OS == "Linux":
+                    import glob as _glob
+                    for tf in _glob.glob("/sys/class/hwmon/hwmon*/temp1_input"):
+                        try:
+                            with open(tf) as fh:
+                                t_val = int(fh.read()) / 1000.0
+                            name_f = os.path.join(os.path.dirname(tf), "name")
+                            name = open(name_f).read().strip() if os.path.exists(name_f) else ""
+                            if "amdgpu" in name or "nouveau" in name:
+                                vals["gpu_temp"] = t_val
+                                break
+                        except OSError:
+                            pass
+            except Exception:
+                pass
+
+        # RAM speed
+        try:
+            if _UI_OS == "Linux":
+                out = subprocess.check_output(
+                    ["dmidecode", "--type", "17"],
+                    timeout=4, stderr=subprocess.DEVNULL).decode()
+                speeds = re.findall(r"Speed:\s+(\d+)\s+MT/s", out)
+                if speeds:
+                    vals["ram_freq"] = float(max(int(s) for s in speeds))
+            elif _UI_OS == "Windows":
+                out, rc = ec._ps(
+                    "(Get-CimInstance Win32_PhysicalMemory).Speed | Measure-Object -Maximum | Select-Object -ExpandProperty Maximum")
+                if rc == 0 and out.strip().isdigit():
+                    vals["ram_freq"] = float(out.strip())
+        except Exception:
+            pass
+
+        # Fan speed
+        try:
+            if _UI_OS == "Linux":
+                import glob as _glob
+                for ff in _glob.glob("/sys/class/hwmon/hwmon*/fan1_input"):
+                    try:
+                        with open(ff) as fh:
+                            vals["fan_rpm"] = float(fh.read().strip())
+                        break
+                    except OSError:
+                        pass
+        except Exception:
+            pass
+
+        return vals
+
+    def _run_advisory(self):
+        """Run check_overclock and return findings."""
+        reporter = ec._Reporter()
+        try:
+            ec.check_overclock(reporter)
+        except Exception:
+            pass
+        findings = []
+        for chk in reporter._data.get("checks", []):
+            for f in chk.get("findings", []):
+                findings.append(f)
+        return findings
+
+    def _poll(self):
+        """Read hardware and advisory in background, update UI."""
+        def _bg():
+            hw   = self._read_hardware()
+            adv  = self._run_advisory()
+            self.frame.after(0, lambda: self._apply(hw, adv))
+        threading.Thread(target=_bg, daemon=True).start()
+        # re-poll every 3 s
+        self._poll_id = self.frame.after(3000, self._poll)
+
+    def _apply(self, hw, findings):
+        for key, val in hw.items():
+            self._update_meter(key, val)
+        # Only re-render advisory when findings actually change
+        adv_key = tuple((f.get("label",""), f.get("severity","")) for f in findings)
+        if adv_key != self._last_adv_key:
+            self._last_adv_key = adv_key
+            self._render_advisory(findings)
+
+    def _render_advisory(self, findings):
+        for w in self._adv_inner.winfo_children():
+            w.destroy()
+
+        if not findings:
+            tk.Label(self._adv_inner,
+                     text="No overclocking advisories for this system.",
+                     bg=C["bg"], fg=C["ok"],
+                     font=("TkDefaultFont", 8),
+                     wraplength=220, justify=tk.LEFT).pack(anchor="w", padx=8, pady=8)
+            return
+
+        sev_colors = {
+            "CRITICAL": C["CRITICAL"], "HIGH": C["HIGH"],
+            "MEDIUM": C["MEDIUM"], "REVIEW": C["muted"],
+            "INFO": C["accent"],
+        }
+
+        for f in findings:
+            sev   = f.get("severity", "INFO")
+            label = f.get("label", "")
+            why   = f.get("why", "")
+            fix   = f.get("fix", "")
+            color = sev_colors.get(sev, C["muted"])
+
+            card = tk.Frame(self._adv_inner, bg=C["panel"],
+                            highlightthickness=1, highlightbackground=color)
+            card.pack(fill=tk.X, padx=4, pady=3)
+
+            hf = tk.Frame(card, bg=C["panel"])
+            hf.pack(fill=tk.X, padx=6, pady=(5,0))
+            tk.Label(hf, text=sev, bg=C["panel"], fg=color,
+                     font=("TkDefaultFont", 7, "bold")).pack(side=tk.LEFT)
+            tk.Label(hf, text=label, bg=C["panel"], fg=C["text"],
+                     font=("TkDefaultFont", 8, "bold"),
+                     wraplength=190, justify=tk.LEFT).pack(anchor="w", padx=(4,0))
+
+            if why:
+                tk.Label(card, text=why, bg=C["panel"], fg=C["muted"],
+                         font=("TkDefaultFont", 7),
+                         wraplength=210, justify=tk.LEFT).pack(anchor="w", padx=6, pady=(2,0))
+            if fix:
+                tk.Label(card, text=fix, bg=C["panel"], fg=C["accent"],
+                         font=("TkDefaultFont", 7),
+                         wraplength=210, justify=tk.LEFT).pack(anchor="w", padx=6, pady=(1,4))
+            else:
+                card.pack_configure(pady=(3,3))
+                tk.Frame(card, bg=C["panel"], height=4).pack()
+
+
 # ── Main application ───────────────────────────────────────────────────────────
 
 class App:
@@ -2148,6 +2960,8 @@ class App:
         self._tab_cleaner   = ScanTab(
             self._nb, "Cleaner",   "Clean status",   self, self._run_cleaner,
             session_tracker=self._tracker)
+        self._tab_benchmark = BenchmarkTab(self._nb, self)
+        self._tab_overclock = OverclockTab(self._nb, self)
         self._tab_snapshots = SnapshotsTab(self._nb, self)
 
         # ── Scan activity log ──────────────────────────────────────────────────
@@ -2244,6 +3058,12 @@ class App:
     # ── Seagull animation ─────────────────────────────────────────────────────
 
     def _animate_hdr_gull(self):
+        try:
+            if self.root.state() == "iconic" or not self.root.winfo_ismapped():
+                self.root.after(300, self._animate_hdr_gull)
+                return
+        except Exception:
+            pass
         c = self._hdr_gull
         c.delete("all")
         # Realistic flap: ~2.5 Hz, asymmetric sine for natural wing beat
@@ -2439,9 +3259,11 @@ class App:
                         # Hide when app is minimised so gulls don't linger
                         # on the taskbar / desktop.
                         try:
-                            if self.root.state() == "iconic":
+                            hidden = (self.root.state() == "iconic" or
+                                      not self.root.winfo_ismapped())
+                            if hidden:
                                 top.withdraw()
-                                self.root.after(200, _tick)
+                                self.root.after(300, _tick)
                                 return
                             else:
                                 top.deiconify()
@@ -3244,18 +4066,6 @@ class VeniceSplash:
         self._draw_single_gull(cnv, ex2, ey2, t + 0.28, freq=3.1,
                                scale=0.46, alpha=0.38, tag="gull")
 
-        # Water-surface shadow / ripple under the lead gull
-        shadow_y = self._hz + (self._hz - cy) * 0.35
-        if shadow_y < self.H - 10:
-            for rrad, ralpha in (
-                ((18, 0.30), (28, 0.18), (38, 0.10))
-            ):
-                cnv.create_oval(
-                    cx - rrad, shadow_y - rrad // 4,
-                    cx + rrad, shadow_y + rrad // 4,
-                    outline=self._shade("#1e4a6a", ralpha),
-                    fill="", width=1, tags="gull"
-                )
 
     def _draw_titles(self):
         cnv = self._cnv

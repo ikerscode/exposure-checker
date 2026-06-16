@@ -11,6 +11,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import time
 
 from .._core import (
     _OS, _ps, _ps_quote, _shell_quote, _truncate,
@@ -22,11 +23,44 @@ from .._core import (
 # ── System Cleaner ─────────────────────────────────────────────────────────────
 
 def _dir_size_mb(path):
-    """Best-effort recursive directory size in MB; returns 0 on permission error."""
+    """Best-effort recursive directory size in MB.
+
+    Uses `du` on Linux/macOS (fast, single kernel call) and falls back to
+    os.walk capped at 100 000 files to avoid hanging on large browser caches.
+    """
+    import platform as _plat
+    if not os.path.exists(path):
+        return 0
+    system = _plat.system()
+    if system == "Linux":
+        try:
+            r = subprocess.run(["du", "-sb", path],
+                               capture_output=True, text=True, timeout=10)
+            if r.returncode == 0:
+                parts = r.stdout.split()
+                if parts:
+                    return int(parts[0]) // (1024 * 1024)
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            pass
+    elif system == "Darwin":
+        try:
+            r = subprocess.run(["du", "-sk", path],
+                               capture_output=True, text=True, timeout=10)
+            if r.returncode == 0:
+                parts = r.stdout.split()
+                if parts:
+                    return (int(parts[0]) * 1024) // (1024 * 1024)
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            pass
+    # Fallback (Windows or du failure) — cap at 100 000 files to stay fast
     total = 0
+    count = 0
     try:
         for dirpath, _, filenames in os.walk(path):
             for fn in filenames:
+                count += 1
+                if count > 100_000:
+                    return total // (1024 * 1024)
                 try:
                     total += os.path.getsize(os.path.join(dirpath, fn))
                 except OSError:

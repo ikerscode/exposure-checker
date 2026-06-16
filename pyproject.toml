@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gullwing"
-version = "1.0.7"
+version = "1.0.8"
 description = "Self-hosted security scanner: port scan, SSH audit, auth log analysis, TLS cert expiry, CVE scan, and more"
 requires-python = ">=3.9"
 license = { text = "MIT" }

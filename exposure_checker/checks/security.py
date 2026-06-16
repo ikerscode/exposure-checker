@@ -2381,7 +2381,7 @@ def _check_malware_windows(reporter):
     reporter.end("Windows Defender + heuristic scan complete.")
 
 
-_AV_CLAMAV_PATHS  = ["/tmp", "/var/tmp", "/dev/shm", "/home", "/root", "/etc"]
+_AV_CLAMAV_PATHS  = ["/tmp", "/var/tmp", "/dev/shm"]
 _AV_TEMP_DIRS     = ["/tmp", "/var/tmp", "/dev/shm"]
 _AV_SCRIPT_DIRS   = [
     "/etc/cron.d", "/etc/cron.daily", "/etc/cron.hourly",

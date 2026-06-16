@@ -71,8 +71,8 @@ app = BUNDLE(
     icon=None,
     bundle_identifier='com.gullwing.app',
     info_plist={
-        'CFBundleShortVersionString': '1.0.7',
-        'CFBundleVersion': '1.0.7',
+        'CFBundleShortVersionString': '1.0.8',
+        'CFBundleVersion': '1.0.8',
         'NSHighResolutionCapable': True,
         'NSRequiresAquaSystemAppearance': False,
     },
