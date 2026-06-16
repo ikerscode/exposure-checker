@@ -24,3 +24,8 @@ results/
 scan-*.json
 scan-*.html
 *.log
+
+# Python build artifacts
+*.egg-info/
+__pycache__/
+*.pyc

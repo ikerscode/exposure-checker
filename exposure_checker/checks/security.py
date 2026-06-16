@@ -10,6 +10,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import time
 
 from .._core import (
     _OS, _ps, _ps_quote, _shell_quote, _truncate,
@@ -2069,6 +2070,16 @@ def check_auth_log(reporter, log_paths=None):
     for log_path in log_paths:
         try:
             with open(log_path, errors="replace") as fh:
+                # On servers auth.log can reach gigabytes. Reading it whole would
+                # stall the scan, so tail the last 50 MB — which is also where
+                # the most recent (most relevant) brute-force activity lives.
+                try:
+                    sz = os.path.getsize(log_path)
+                    if sz > 80 * 1024 * 1024:
+                        fh.seek(sz - 50 * 1024 * 1024)
+                        fh.readline()          # discard the partial first line
+                except OSError:
+                    pass
                 for line in fh:
                     m = _RE_FAILED.search(line)
                     if m:
@@ -2460,14 +2471,22 @@ def _av_run_clamav(reporter, paths):
     if not existing:
         return 0
 
-    reporter.info(f"ClamAV: scanning {', '.join(existing)}…")
+    reporter.info(
+        f"ClamAV: loading signatures and scanning {', '.join(existing)}… "
+        "(first run can take ~30 s while the virus database loads)"
+    )
     try:
         result = subprocess.run(
-            ["clamscan", "--recursive", "--infected", "--no-summary", *existing],
-            capture_output=True, text=True, timeout=300,
+            ["clamscan", "--recursive", "--infected", "--no-summary",
+             # Bound the work so a giant temp file can't stall the scan.
+             "--max-filesize=50M", "--max-scansize=300M", *existing],
+            capture_output=True, text=True, timeout=120,
         )
     except subprocess.TimeoutExpired:
-        reporter.error("ClamAV scan timed out (300 s) — try scanning fewer paths.")
+        reporter.info(
+            "ClamAV scan stopped at the 120 s limit — temp directories are large. "
+            "Heuristic indicators below still ran."
+        )
         return 0
     except OSError as e:
         reporter.error(f"ClamAV failed to run: {e}")
@@ -2630,11 +2649,21 @@ def _av_check_ld_preload(reporter):
 _AV_TEMP_DIR_SET = frozenset(_AV_TEMP_DIRS)
 
 
-def _av_scan_scripts(reporter, script_dirs=None):
-    """Scan scripts in high-risk dirs for known-bad patterns."""
+def _av_scan_scripts(reporter, script_dirs=None, max_seconds=12.0):
+    """Scan scripts in high-risk dirs for known-bad patterns.
+
+    Reading and regex-scanning full file contents over a large web root
+    (/var/www) is otherwise unbounded, so the whole pass is capped by a
+    wall-clock budget — on a big tree it scans what it can and stops cleanly
+    rather than stalling the antivirus scan.
+    """
     hits = []
     seen = set()
+    t0 = time.time()
+    budget_hit = False
     for base in (script_dirs or _AV_SCRIPT_DIRS):
+        if budget_hit:
+            break
         if not os.path.exists(base):
             continue
         in_temp = base in _AV_TEMP_DIR_SET
@@ -2643,6 +2672,9 @@ def _av_scan_scripts(reporter, script_dirs=None):
         else:
             walk_iter = os.walk(base, followlinks=False)
         for root, _dirs, files in walk_iter:
+            if time.time() - t0 > max_seconds:
+                budget_hit = True
+                break
             for fname in files:
                 fpath = os.path.join(root, fname) if root else fname
                 if fpath in seen:

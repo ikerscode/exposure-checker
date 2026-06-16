@@ -1,9 +1,11 @@
 """Fix runner and interactive remediation menu."""
 
 import argparse
+import errno
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 
@@ -15,7 +17,6 @@ def _run_fix_cmd(cmd):
     try:
         if _OS == "Windows":
             no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            # $ErrorActionPreference='Stop' makes cmdlet failures non-zero exit codes
             full_cmd = f"$ErrorActionPreference = 'Stop'; {cmd}"
             result = subprocess.run(
                 ["powershell", "-NonInteractive", "-NoProfile", "-Command", full_cmd],
@@ -31,8 +32,27 @@ def _run_fix_cmd(cmd):
         return result.returncode, result.stdout.strip()
     except subprocess.TimeoutExpired:
         return 1, "timed out"
+    except OSError as e:
+        if e.errno == errno.EDQUOT:
+            return 1, "disk quota exceeded — free up disk space before applying fixes"
+        if e.errno == errno.ENOSPC:
+            return 1, "no space left on device — free up disk space before applying fixes"
+        return 1, str(e)
     except Exception as e:
         return 1, str(e)
+
+
+def _check_disk_space(min_mb: int = 50):
+    """Return a warning string if disk space is critically low, else None."""
+    try:
+        usage = shutil.disk_usage("/")
+        free_mb = usage.free / (1024 * 1024)
+        if free_mb < min_mb:
+            return (f"Only {free_mb:.0f} MB free on disk — fixes that write to disk "
+                    f"will fail. Free up space before continuing.")
+    except OSError:
+        pass
+    return None
 
 
 def _collect_fixable(report_data):

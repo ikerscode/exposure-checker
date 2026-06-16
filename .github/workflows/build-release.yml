@@ -1,8 +1,8 @@
 # Builds the desktop app for all three platforms and publishes a GitHub Release.
 #
 # Trigger: push a version tag, e.g.
-#   git tag v1.0.7
-#   git push origin v1.0.7
+#   git tag v1.0.8
+#   git push origin v1.0.8
 #
 # The release will contain:
 #   gullwing-macos.dmg        (drag-to-Applications installer)
@@ -45,7 +45,7 @@ jobs:
         run: sudo apt-get install -y python3-tk
 
       - name: Install build dependencies
-        run: pip install pyinstaller cryptography
+        run: pip install pyinstaller cryptography pygame-ce numpy
 
       - name: Install package
         run: pip install -e .

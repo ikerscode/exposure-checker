@@ -1,11 +1,32 @@
-# Gullwing v1.0.7
+# Gullwing v1.0.8
 
-**Tune it. Lock it. Send it.** — a fully local, offline desktop tool for Windows, macOS, and Linux.  
-No cloud. No APIs. No telemetry. Everything runs on your machine.
+**Tune it. Lock it. Send it.** — a fully local, offline desktop companion for Windows, macOS, and Linux.  
+No cloud. No APIs. No telemetry. No account. Everything runs on your machine.
+
+---
+
+## Why Gullwing
+
+Most "PC optimizers" do one thing, phone home, and ask you to trust a black box. Gullwing is the opposite:
+
+- **🛡️ All-in-one.** Security audit, malware heuristics, performance tuning, disk cleaner, benchmark, and an overclock advisory — one app, six jobs, three operating systems.
+- **🔒 100% local & private.** Nothing ever leaves your machine. No telemetry, no analytics, no API keys, no account. Every fix is a plain shell / PowerShell / registry command, shown to you before it runs.
+- **↩️ Fully reversible.** Gullwing snapshots your config before it changes anything. One **Revert Session** button rolls back every fix applied — so you can experiment without fear.
+- **👁️ Transparent.** Every finding has a severity, a plain-English explanation, and the exact command behind its **Fix** button. *Copy Commands* lets you run them yourself.
+- **✨ Beautiful.** A cinematic, hardware-accelerated loading screen and an Opera-GX-style live hardware monitor — a tool you actually want to open.
+
+> **The trust pitch:** other cleaners had to earn back trust after telemetry scandals. Gullwing can't leak what it never collects.
 
 ---
 
 ## Quick Start
+
+> **Optional — cinematic splash:** Gullwing ships a hardware-accelerated Venice-sunset loading screen. To enable it, install the extra:
+> ```bash
+> pip install "pygame-ce" "numpy"      # or: pip install -e ".[splash]"
+> ```
+> Without these it falls back to the built-in animated splash — the app works either way.
+
 
 ### Windows
 Double-click `gullwing_ui.py` — it will ask for admin rights, then open.
@@ -205,6 +226,26 @@ Everything that affects frame rate, input latency, and system responsiveness.
 
 ---
 
+## Cleaner Tab
+
+Reclaim disk space safely — every target is shown with its size before you clear it, and large directory scans are time-budgeted so they never stall.
+
+| Check | Platforms | What it reclaims |
+|---|---|---|
+| User & system temp folders | Win / macOS / Linux | Stale temporary files |
+| Browser caches (Chrome, Edge, Brave, Firefox, Safari) | All | Rebuildable browser cache (flagged above 150 MB) |
+| Developer caches (pip, npm) | All | Package-manager download caches (flagged above 200 MB) |
+| APT / DNF package cache & orphans | Linux | Downloaded `.deb`/`.rpm` files and unused dependencies |
+| Old kernels | Linux | Superseded `linux-image-*` packages |
+| systemd journal bloat | Linux | Vacuums logs to 200 MB |
+| Crash reports & dumps | Win / Linux | `/var/crash`, minidumps, app crash dumps |
+| Windows Update / Delivery Optimization cache | Windows | Downloaded update files & P2P seed cache |
+| Recycle Bin / Trash | Win / macOS | Deleted files still occupying disk |
+| Xcode / iOS backups / Homebrew cache | macOS | Derived data, device backups, brew downloads |
+| Thumbnail cache, dpkg config debris, stale temp files | Linux | Misc reclaimable debris |
+
+---
+
 ## Protection Tab
 
 ### Windows Hardening
@@ -286,14 +327,29 @@ Every overclocking finding displays a risk warning. Do not act on these findings
 
 ---
 
-## All Fixes Are Local
+## Safe by Design
 
 Every fix Gullwing applies is a local shell command, PowerShell command, or registry write. There are no:
 - API calls or cloud connections
 - Telemetry or analytics
 - Stored credentials or secrets
 
-The Fix button shows you the exact command it will run. You are always in control.
+The Fix button shows you the exact command it will run, and you are always in control:
+
+- **Snapshot & Revert.** Before applying fixes, Gullwing snapshots the affected config (SSH, firewall rules, sysctl, hosts). **Revert Session** rolls back everything you changed this session.
+- **Accept Risk.** Dismiss a finding you've reviewed and don't want to fix — it won't nag you on the next scan.
+- **Copy Commands.** Prefer to run things yourself? Copy the exact commands and paste them into your own terminal.
+- **Disk-space pre-flight.** Fixes that write to disk warn you first if space is critically low.
+
+---
+
+## What's New in v1.0.8
+
+- **🎬 Cinematic loading screen.** A hardware-accelerated (pygame + numpy) Venice-canal sunset: one-point-perspective palazzos, real rippled water reflections, volumetric god-rays, lens flare, sunset-lit clouds, film-grain & filmic tone-mapping — with a flock of seagulls gliding down the canal. Falls back to the built-in animated splash when the optional libraries aren't installed.
+- **⚡ Faster, never-hanging scans.** Antivirus and Cleaner scans are now fully time-budgeted: ClamAV is capped and size-limited, the script scanner and `auth.log` reader tail/stop cleanly on huge inputs, and directory sizing is bounded — no more endless "scanning…" on big systems.
+- **🎛️ Opera-GX-style live monitor.** The Overclock tab's hardware meters animate at 30 fps with glow bars and only re-render the advisory when findings actually change (no more full-panel flicker).
+- **🪶 More prominent gulls** with dark wingtips, soft water shadows, motion-blur, and reflections in the canal.
+- **🛠️ Stability fixes** across malware, cleaner, and storage modules (including a latent missing-import crash on systems with ClamAV installed).
 
 ---
 
@@ -307,4 +363,4 @@ The Fix button shows you the exact command it will run. You are always in contro
 
 ---
 
-*Gullwing v1.0.7 — built for people who want their machine to perform.*
+*Gullwing v1.0.8 — built for people who want their machine to perform.*

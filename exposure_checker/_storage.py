@@ -4,9 +4,29 @@ import datetime
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import time
 
 from ._core import _OS, _ps, _DEFAULT_BASELINE, _SMTP_CONFIG_PATH, _SCHEDULE_FILE, _Reporter
+from ._remediate import _run_fix_cmd
+
+_EC_DATA_DIR = os.path.join(
+    os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"),
+    "gullwing",
+)
+_HISTORY_DIR = os.path.join(_EC_DATA_DIR, "history")
+_SNAPSHOT_DIR = os.path.join(_EC_DATA_DIR, "snapshots")
+_ACCEPTED_FILE = os.path.join(_EC_DATA_DIR, "accepted_risks.json")
+
+_SNAPSHOT_CAPTURED_FILES = [
+    "/etc/ssh/sshd_config",
+    "/etc/ufw/user.rules",
+    "/etc/ufw/user6.rules",
+    "/etc/sysctl.conf",
+    "/etc/hosts",
+]
 
 def save_scan_history(tab: str, score: int, grade: str, counts: dict) -> None:
     d = os.path.join(_HISTORY_DIR, tab.lower())

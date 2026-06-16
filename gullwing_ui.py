@@ -4249,6 +4249,16 @@ def main():
     if _UI_OS != "Linux":
         _ensure_admin()
 
+    # High-fidelity pygame splash (real raster renderer). Runs fully and closes
+    # its own window *before* Tk is created. Falls back to the Tk splash below
+    # if pygame is not installed or anything goes wrong.
+    used_pygame_splash = False
+    try:
+        import gullwing_splash
+        used_pygame_splash = gullwing_splash.run_splash(version=ec.__version__)
+    except Exception:
+        used_pygame_splash = False
+
     root = tk.Tk()
     root.withdraw()
     # On HiDPI Windows, sync Tk's logical scaling to the real DPI so fonts and
@@ -4272,11 +4282,15 @@ def main():
         root.deiconify()
         root.lift()
 
-    try:
-        splash = _show_splash(root)
-        splash.wait_done(_show_main)
-    except Exception:
+    if used_pygame_splash:
+        # The pygame splash already played; go straight to the app.
         _show_main()
+    else:
+        try:
+            splash = _show_splash(root)
+            splash.wait_done(_show_main)
+        except Exception:
+            _show_main()
 
     root.mainloop()
 

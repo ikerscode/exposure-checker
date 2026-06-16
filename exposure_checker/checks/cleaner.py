@@ -52,9 +52,10 @@ def _dir_size_mb(path):
                     return (int(parts[0]) * 1024) // (1024 * 1024)
         except (OSError, subprocess.TimeoutExpired, ValueError):
             pass
-    # Fallback (Windows or du failure) — cap at 100 000 files to stay fast
+    # Fallback (Windows or du failure) — cap at 100 000 files / 8 s to stay fast
     total = 0
     count = 0
+    t0 = time.time()
     try:
         for dirpath, _, filenames in os.walk(path):
             for fn in filenames:
@@ -65,6 +66,8 @@ def _dir_size_mb(path):
                     total += os.path.getsize(os.path.join(dirpath, fn))
                 except OSError:
                     pass
+            if (time.time() - t0) > 8.0:   # guard slow / network filesystems
+                break
     except OSError:
         pass
     return total // (1024 * 1024)

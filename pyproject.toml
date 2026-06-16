@@ -17,6 +17,15 @@ dev = [
     "pytest>=7",
     "pytest-mock>=3",
 ]
+# Cinematic pygame splash screen. Optional: the app falls back to the built-in
+# Tkinter splash if pygame is not installed. pygame-ce is the community fork —
+# a drop-in replacement (import pygame) with much better wheel coverage for new
+# Python versions. numpy powers the per-pixel water reflection and filmic
+# post-processing; without it the splash still runs with a lighter reflection.
+splash = [
+    "pygame-ce>=2.4",
+    "numpy>=1.23",
+]
 
 [project.scripts]
 gullwing    = "exposure_checker:main"
