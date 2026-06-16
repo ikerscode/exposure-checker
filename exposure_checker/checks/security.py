@@ -1036,7 +1036,7 @@ def check_world_writable(reporter):
             "Any local user can modify this file; if executed with elevated privileges "
             "this is a privilege-escalation path.",
             f"Run: chmod o-w '{f}'",
-            fix_cmds=[f"chmod o-w '{f}'"],
+            fix_cmds=[f"chmod o-w {shlex.quote(f)}"],
             path=f,
         )
     reporter.end(f"{len(files)} world-writable file(s). Review above.")
@@ -1934,7 +1934,7 @@ def check_docker_socket(reporter, sock_path="/var/run/docker.sock"):
             "Any local user can issue Docker API commands and trivially escalate "
             "to root by mounting the host filesystem inside a container.",
             f"chmod 660 {sock_path} && chown root:docker {sock_path}",
-            fix_cmds=[f"chmod 660 {sock_path}"],
+            fix_cmds=[f"chmod 660 {shlex.quote(sock_path)}"],
         )
     elif mode & 0o004:
         reporter.finding(
@@ -1943,7 +1943,7 @@ def check_docker_socket(reporter, sock_path="/var/run/docker.sock"):
             "World-readable Docker socket leaks container metadata and "
             "may enable read-only API access by any local user.",
             f"chmod 660 {sock_path}",
-            fix_cmds=[f"chmod 660 {sock_path}"],
+            fix_cmds=[f"chmod 660 {shlex.quote(sock_path)}"],
         )
     else:
         reporter.ok("Docker socket is not world-accessible.")

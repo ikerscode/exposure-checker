@@ -786,6 +786,7 @@ def _batch_fix_linux(cmds):
     try:
         with os.fdopen(fd, "w") as fh:
             fh.write("\n".join(lines) + "\n")
+        os.chmod(spath, 0o700)
         result = subprocess.run([pkexec, "bash", spath],
                                 capture_output=True, text=True, timeout=120)
         return _parse_batch_output(cmds, result.stdout)
@@ -1029,6 +1030,8 @@ class _FindingsPane:
         self._cards:    list = []
         self._selected: dict = {}   # idx → BooleanVar (unused currently but kept for API)
         self._parent = parent
+        self._info_findings: list = []   # INFO-severity findings buffered out of the card list
+        self._info_toggle   = None       # outer Frame for the collapsible INFO section
 
         # Alert banner — packed before the scroll canvas when there are C/H findings
         self._alert_frame   = tk.Frame(parent, bg=C["panel"],
@@ -1108,12 +1111,127 @@ class _FindingsPane:
     # ── Public API ────────────────────────────────────────────────────────────
 
     def add_finding(self, f: dict):
+        if f.get("severity") == "INFO":
+            self._info_findings.append(f)
+            return                      # INFO cards are shown only under the collapsed toggle
         idx = len(self._findings)
         self._findings.append(f)
         if f.get("fix_cmds"):
             self._selected[idx] = tk.BooleanVar(value=False)
         self._build_card(f)
         self._set_empty(False)
+
+    def flush_info_group(self):
+        """Called when a scan completes: sort visible cards by severity, then
+        append a collapsed toggle for any buffered INFO findings."""
+        self._sort_visible_cards()
+        if self._info_findings:
+            self._build_info_toggle()
+        if self._findings or self._info_findings:
+            self._set_empty(False)
+
+    def _sort_visible_cards(self):
+        """Re-order non-INFO cards: CRITICAL first, then HIGH, MEDIUM, REVIEW."""
+        if len(self._findings) <= 1:
+            return
+        _ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "REVIEW": 3}
+        paired = list(zip(self._findings, self._cards))
+        paired.sort(key=lambda x: _ORDER.get(x[0].get("severity", ""), 99))
+        for _, card in paired:
+            card.pack_forget()
+        self._findings = [p[0] for p in paired]
+        self._cards    = [p[1] for p in paired]
+        for card in self._cards:
+            card.pack(fill=tk.X, padx=12, pady=(8, 0))
+
+    def _build_info_toggle(self):
+        """Build the collapsible INFO section at the bottom of the card list."""
+        n = len(self._info_findings)
+        outer = tk.Frame(self._inner, bg=C["bg"])
+        outer.pack(fill=tk.X, padx=12, pady=(14, 8))
+        self._info_toggle = outer
+
+        hdr = tk.Frame(outer, bg=C["bg"])
+        hdr.pack(fill=tk.X)
+        lbl_txt = f"▶  Show {n} informational item{'s' if n != 1 else ''}"
+        self._info_btn = tk.Label(hdr, text=lbl_txt, bg=C["bg"], fg=C["muted"],
+                                  font=("TkDefaultFont", 9), cursor="hand2")
+        self._info_btn.pack(side=tk.LEFT)
+        tk.Frame(hdr, bg=C["border"], height=1).pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0), pady=6)
+
+        self._info_body     = tk.Frame(outer, bg=C["bg"])
+        self._info_expanded = False
+        for f in self._info_findings:
+            self._build_info_card(f, self._info_body)
+
+        self._info_btn.bind("<Button-1>", self._toggle_info)
+        self._info_btn.bind("<Enter>",
+            lambda _e: self._info_btn.configure(fg=C["accent"]))
+        self._info_btn.bind("<Leave>",
+            lambda _e: self._info_btn.configure(fg=C["muted"]))
+        self._bind_scroll(outer)
+
+    def _build_info_card(self, f: dict, parent: tk.Frame):
+        """Compact card for an INFO finding (no Fix button; ⋯ still allows Accept Risk)."""
+        accepted  = f.get("_accepted", False)
+        stripe    = self._STRIPE["INFO"]
+        card_bg   = C["bg"]
+        card = tk.Frame(parent, bg=card_bg,
+                        highlightthickness=1, highlightbackground=C["border"])
+        card.pack(fill=tk.X, pady=(4, 0))
+
+        tk.Frame(card, bg=stripe, width=4).pack(side=tk.LEFT, fill=tk.Y)
+
+        right_f = tk.Frame(card, bg=card_bg)
+        right_f.pack(side=tk.RIGHT, padx=(4, 8), pady=7)
+        ttk.Button(right_f, text="⋯", style="Dim.TButton", width=2,
+                   command=lambda _f=f: self._open_info_overflow(_f)).pack()
+
+        body = tk.Frame(card, bg=card_bg)
+        body.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 8), pady=7)
+
+        top = tk.Frame(body, bg=card_bg)
+        top.pack(fill=tk.X)
+        tk.Label(top, text="INFO", bg=stripe, fg="#060a0f",
+                 font=("TkDefaultFont", 7, "bold"), padx=6, pady=2).pack(side=tk.LEFT)
+        if f.get("check"):
+            tk.Label(top, text=f"  {f['check']}", bg=card_bg, fg=C["muted"],
+                     font=("TkDefaultFont", 8)).pack(side=tk.LEFT)
+        if accepted:
+            tk.Label(top, text="  Accepted risk", bg=card_bg, fg=C["ok"],
+                     font=("TkDefaultFont", 7, "bold")).pack(side=tk.LEFT)
+
+        title_fg = C["muted"] if accepted else C["text"]
+        tk.Label(body, text=f.get("label", ""), bg=card_bg, fg=title_fg,
+                 font=("TkDefaultFont", 10, "bold"),
+                 anchor="w", wraplength=500, justify=tk.LEFT).pack(
+            fill=tk.X, pady=(4, 0))
+        if f.get("why") and not accepted:
+            tk.Label(body, text=f["why"], bg=card_bg, fg=C["muted"],
+                     font=("TkDefaultFont", 9), anchor="w",
+                     wraplength=500, justify=tk.LEFT).pack(fill=tk.X, pady=(2, 0))
+        self._bind_scroll(card)
+        return card
+
+    def _open_info_overflow(self, f: dict):
+        """Accept-risk dialog for INFO findings (card rebuild omitted; re-scan to reflect)."""
+        root = self._inner.winfo_toplevel()
+        _AcceptRiskDialog(root, f.get("check", ""), f.get("label", ""))
+
+    def _toggle_info(self, _e=None):
+        self._info_expanded = not self._info_expanded
+        n = len(self._info_findings)
+        if self._info_expanded:
+            self._info_btn.configure(
+                text=f"▼  Hide {n} informational item{'s' if n != 1 else ''}")
+            self._info_body.pack(fill=tk.X, pady=(6, 0))
+        else:
+            self._info_btn.configure(
+                text=f"▶  Show {n} informational item{'s' if n != 1 else ''}")
+            self._info_body.pack_forget()
+        self._inner.update_idletasks()
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
 
     def clear(self):
         self.hide_alert()
@@ -1122,6 +1240,10 @@ class _FindingsPane:
         self._cards.clear()
         self._findings.clear()
         self._selected.clear()
+        self._info_findings.clear()
+        if self._info_toggle and self._info_toggle.winfo_exists():
+            self._info_toggle.destroy()
+        self._info_toggle = None
         self._set_empty(True)
         self._canvas.yview_moveto(0)
 
@@ -1752,6 +1874,12 @@ class ScanTab:
             except Exception:
                 pass
 
+        # Sort visible cards and collapse INFO noise, then surface the overview.
+        self._pane.flush_info_group()
+        if hasattr(self.app, "_tab_overview"):
+            self.app._tab_overview.refresh()
+            self.app._nb.select(self.app._tab_overview.frame)
+
     def _finish_fix(self, success: bool):
         self.app.set_gull_fixing(False)
         self.app._progress.stop()
@@ -1797,6 +1925,260 @@ class ScanTab:
             messagebox.showerror("Save failed", err)
         else:
             self.app._set_status(f"Saved → {path}")
+
+
+# ── Overview tab ───────────────────────────────────────────────────────────────
+
+class OverviewTab:
+    """First notebook tab: cross-tab Safety / Speed summary with one-click Fix recommended.
+
+    Safety column  — Security, Protection, Antivirus scan tabs.
+    Speed column   — Performance, Cleaner scan tabs.
+    INFO findings are excluded from all counts (they are presentation-noise).
+    Each count badge is a clickable label that selects the relevant ScanTab.
+    "Fix recommended" collects every CRITICAL/HIGH fix_cmd from all scan tabs
+    and runs them via _batch_fix_elevated in a single elevation prompt.
+    """
+
+    # (tab-attr-name, display-name, column)
+    _TAB_COLS = [
+        ("_tab_security",     "Security",    "safety"),
+        ("_tab_protection",   "Protection",  "safety"),
+        ("_tab_antivirus",    "Antivirus",   "safety"),
+        ("_tab_performance",  "Performance", "speed"),
+        ("_tab_cleaner",      "Cleaner",     "speed"),
+    ]
+
+    def __init__(self, notebook, app):
+        self._nb  = notebook
+        self._app = app
+        self.frame = ttk.Frame(notebook)
+        notebook.add(self.frame, text="  ◈  Overview  ")
+        self._build()
+
+    def _build(self):
+        outer = tk.Frame(self.frame, bg=C["bg"])
+        outer.pack(fill=tk.BOTH, expand=True, padx=20, pady=16)
+
+        hdr = tk.Frame(outer, bg=C["bg"])
+        hdr.pack(fill=tk.X, pady=(0, 14))
+        tk.Label(hdr, text="System Overview",
+                 bg=C["bg"], fg=C["text"],
+                 font=("TkDefaultFont", 14, "bold")).pack(side=tk.LEFT)
+        self._hint = tk.Label(hdr,
+                              text="Run a scan on any tab to see results here.",
+                              bg=C["bg"], fg=C["muted"],
+                              font=("TkDefaultFont", 9))
+        self._hint.pack(side=tk.RIGHT)
+
+        cols = tk.Frame(outer, bg=C["bg"])
+        cols.pack(fill=tk.BOTH, expand=True)
+
+        self._safety_body = self._make_column(cols, "Safety",  side=tk.LEFT,  padx=(0, 8))
+        self._speed_body  = self._make_column(cols, "Speed",   side=tk.LEFT,  padx=(8, 0))
+
+        fix_row = tk.Frame(outer, bg=C["bg"])
+        fix_row.pack(pady=(18, 0), anchor="w")
+        self._btn_fix = ttk.Button(fix_row,
+                                   text="Fix recommended  (0 issues)",
+                                   style="Dim.TButton",
+                                   state=tk.DISABLED,
+                                   command=self._fix_recommended)
+        self._btn_fix.pack(side=tk.LEFT)
+
+    def _make_column(self, parent, title, side, padx):
+        col = tk.Frame(parent, bg=C["panel"],
+                       highlightthickness=1, highlightbackground=C["border"])
+        col.pack(side=side, fill=tk.BOTH, expand=True, padx=padx)
+        tk.Label(col, text=title.upper(),
+                 bg=C["panel"], fg=C["muted"],
+                 font=("TkDefaultFont", 9, "bold"),
+                 padx=14, pady=10).pack(anchor="w")
+        tk.Frame(col, bg=C["border"], height=1).pack(fill=tk.X, padx=12)
+        body = tk.Frame(col, bg=C["panel"])
+        body.pack(fill=tk.BOTH, expand=True, padx=12, pady=10)
+        return body
+
+    def refresh(self):
+        """Rebuild counts from live ScanTab findings. Called after every scan."""
+        for w in self._safety_body.winfo_children():
+            w.destroy()
+        for w in self._speed_body.winfo_children():
+            w.destroy()
+
+        total_fixable = 0
+        has_any_data  = False
+
+        for attr, display_name, col in self._TAB_COLS:
+            tab = getattr(self._app, attr, None)
+            if tab is None:
+                continue
+            body = self._safety_body if col == "safety" else self._speed_body
+            findings = getattr(tab, "_findings", [])
+            if findings:
+                has_any_data = True
+            ch = sum(1 for f in findings
+                     if f.get("severity") in ("CRITICAL", "HIGH")
+                     and not f.get("_accepted"))
+            mr = sum(1 for f in findings
+                     if f.get("severity") in ("MEDIUM", "REVIEW"))
+            fix = sum(1 for f in findings
+                      if f.get("severity") in ("CRITICAL", "HIGH")
+                      and f.get("fix_cmds") and not f.get("_accepted"))
+            total_fixable += fix
+            self._build_tab_row(body, tab, display_name, ch, mr)
+
+        noun = "issue" if total_fixable == 1 else "issues"
+        if total_fixable > 0:
+            self._btn_fix.configure(
+                text=f"Fix recommended  ({total_fixable} {noun})",
+                state=tk.NORMAL, style="Fix.TButton")
+        else:
+            self._btn_fix.configure(
+                text="Fix recommended  (0 issues)",
+                state=tk.DISABLED, style="Dim.TButton")
+
+        self._hint.configure(
+            text="" if has_any_data
+            else "Run a scan on any tab to see results here.")
+
+    def _build_tab_row(self, parent, tab, name, ch, mr):
+        row = tk.Frame(parent, bg=C["panel"])
+        row.pack(fill=tk.X, pady=3)
+
+        tk.Label(row, text=name, bg=C["panel"], fg=C["text"],
+                 font=("TkDefaultFont", 9), width=13, anchor="w").pack(side=tk.LEFT)
+
+        # CRITICAL / HIGH count — recommended fixes
+        if ch > 0:
+            ch_col = C["CRITICAL"]
+            ch_txt = f"⚠ {ch} recommended"
+            ch_cur = "hand2"
+        else:
+            ch_col = C["muted"]
+            ch_txt = "0 recommended"
+            ch_cur = ""
+        ch_lbl = tk.Label(row, text=ch_txt, bg=C["panel"], fg=ch_col,
+                          font=("TkDefaultFont", 8, "bold" if ch > 0 else "normal"),
+                          padx=6, pady=3, cursor=ch_cur)
+        ch_lbl.pack(side=tk.LEFT, padx=(4, 2))
+        if ch > 0:
+            ch_lbl.bind("<Button-1>", lambda _e, t=tab: self._nb.select(t.frame))
+            ch_lbl.bind("<Enter>",    lambda _e, w=ch_lbl: w.configure(fg=C["accent"]))
+            ch_lbl.bind("<Leave>",    lambda _e, w=ch_lbl, c=ch_col: w.configure(fg=c))
+
+        # MEDIUM / REVIEW count — worth a look
+        if mr > 0:
+            mr_col = C["MEDIUM"]
+            mr_txt = f"{mr} to review"
+            mr_cur = "hand2"
+        else:
+            mr_col = C["muted"]
+            mr_txt = "0 to review"
+            mr_cur = ""
+        mr_lbl = tk.Label(row, text=mr_txt, bg=C["panel"], fg=mr_col,
+                          font=("TkDefaultFont", 8),
+                          padx=6, pady=3, cursor=mr_cur)
+        mr_lbl.pack(side=tk.LEFT, padx=2)
+        if mr > 0:
+            mr_lbl.bind("<Button-1>", lambda _e, t=tab: self._nb.select(t.frame))
+            mr_lbl.bind("<Enter>",    lambda _e, w=mr_lbl: w.configure(fg=C["accent"]))
+            mr_lbl.bind("<Leave>",    lambda _e, w=mr_lbl, c=mr_col: w.configure(fg=c))
+
+    # ── Fix recommended ───────────────────────────────────────────────────────
+
+    def _fix_recommended(self):
+        all_fixable = []
+        for attr, _, _ in self._TAB_COLS:
+            tab = getattr(self._app, attr, None)
+            if tab is None:
+                continue
+            for f in getattr(tab, "_findings", []):
+                if (f.get("severity") in ("CRITICAL", "HIGH")
+                        and f.get("fix_cmds")
+                        and not f.get("_accepted")):
+                    all_fixable.append(f)
+
+        if not all_fixable:
+            return
+
+        if not _is_root() and not _elevation_available():
+            _show_fix_denied_dialog(self._app.root, all_fixable)
+            return
+
+        disk_warn = ec._remediate._check_disk_space(min_mb=50)
+        if disk_warn:
+            if not messagebox.askyesno(
+                "Low disk space",
+                f"⚠  {disk_warn}\n\nSome fixes write to disk and may fail. Continue anyway?",
+                parent=self.frame,
+            ):
+                return
+
+        n_cmd = sum(len(f.get("fix_cmds", [])) for f in all_fixable)
+        sudo_note = ("" if _is_root()
+                     else "\n\nYou will be asked for your password once for all fixes.")
+        noun = "issue" if len(all_fixable) == 1 else "issues"
+        if not messagebox.askyesno(
+            "Apply fixes",
+            f"Fix {len(all_fixable)} {noun} ({n_cmd} command(s))?{sudo_note}",
+            parent=self.frame,
+        ):
+            return
+
+        self._app._tracker.before_fix("Overview")
+        self._app._refresh_revert_btn()
+        self._app.set_gull_fixing(True)
+        self._btn_fix.configure(state=tk.DISABLED, text="Fixing…", style="Dim.TButton")
+        self._app._progress.start(10)
+        self._app._set_status("Gull is on it — applying recommended fixes…")
+        threading.Thread(target=self._fix_worker, args=(all_fixable,),
+                         daemon=True).start()
+
+    def _fix_worker(self, findings):
+        try:
+            results = _batch_fix_elevated(findings)
+            self.frame.after(0, lambda: self._finish_fix(findings, results))
+        except Exception as exc:
+            self.frame.after(0, lambda: self._finish_fix(findings, None, str(exc)))
+
+    def _finish_fix(self, findings, results, err=None):
+        self._app.set_gull_fixing(False)
+        self._app._progress.stop()
+
+        if err or results is None:
+            self._app._log_append(
+                f"\n  ✗ Overview fix error: {err or 'no admin tool available'}\n", "err")
+            self._app._set_status("Fix failed — check Scan activity.")
+            self.refresh()
+            return
+
+        self._app._log_append("\n── Overview: recommended fixes ──\n", "hdr")
+        failed = 0
+        idx    = 0
+        for f in findings:
+            n     = len(f.get("fix_cmds", []))
+            batch = results[idx: idx + n]
+            idx  += n
+            ok    = all(rc == 0 for _, rc, _ in batch)
+            if not ok:
+                failed += 1
+            icon, tag = ("✓", "ok") if ok else ("✗", "err")
+            self._app._log_append(f"  {icon}  {f.get('label', '')}\n", tag)
+
+        if failed == 0:
+            self._app._set_status("Recommended fixes applied — rescanning in 2s…")
+            self._app._log_append("\nFixes applied. Rescanning now…\n", "ok")
+            self.frame.after(2000, self._rescan_tabs_with_data)
+        else:
+            self._app._set_status("Some fixes failed — check Scan activity.")
+        self.refresh()
+
+    def _rescan_tabs_with_data(self):
+        for attr, _, _ in self._TAB_COLS:
+            tab = getattr(self._app, attr, None)
+            if tab and getattr(tab, "_findings", []):
+                tab.start_scan()
 
 
 # ── Snapshots tab ──────────────────────────────────────────────────────────────
@@ -2943,6 +3325,8 @@ class App:
         # Notebook with scan tabs
         self._nb = ttk.Notebook(r)
         self._nb.pack(fill=tk.BOTH, expand=True, padx=16, pady=(6, 0))
+
+        self._tab_overview = OverviewTab(self._nb, self)
 
         self._tab_security  = ScanTab(
             self._nb, "Security",  "Security score", self, self._run_security,
