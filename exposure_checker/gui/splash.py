@@ -127,7 +127,10 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
     HZ = int(H * 0.52)           # horizon line (supersampled space)
     HZ_w = HZ // SS              # horizon line at window resolution
 
-    screen = pygame.display.set_mode((BASE_W, BASE_H), pygame.NOFRAME)
+    screen = pygame.display.set_mode(
+        (BASE_W, BASE_H),
+        pygame.NOFRAME | pygame.HWSURFACE | pygame.DOUBLEBUF,
+    )
     scene = pygame.Surface((W, H)).convert()
     glow = pygame.Surface((W, H), pygame.SRCALPHA)
 
@@ -329,6 +332,18 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
     clock = pygame.time.Clock()
     start = pygame.time.get_ticks()
     fade_in, fade_out = 0.5, 0.7
+
+    # Pre-generate film grain pool — avoids np.random.rand every frame (45×/s)
+    _grain_pool = None
+    _grain_idx  = 0
+    if have_np:
+        try:
+            _grain_pool = [
+                (np.random.rand(BASE_W, BASE_H, 1).astype(np.float32) - 0.5) * 0.016
+                for _ in range(60)
+            ]
+        except Exception:
+            _grain_pool = None
 
     # gull motion-blur history (previous positions for ghosting)
     prev_formation = [None]
@@ -566,8 +581,10 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
         # ── Per-pixel post: filmic tone-map, grade, vignette, CA, grain ───────
         if have_np:
             try:
+                grain = _grain_pool[_grain_idx % 60] if _grain_pool else None
+                _grain_idx += 1
                 _post_np(np, pygame, screen, BASE_W, BASE_H,
-                         vignette, edge_mask, _aces)
+                         vignette, edge_mask, _aces, grain)
             except Exception:
                 pass
 
@@ -650,7 +667,7 @@ def _reflect_simple(pygame, scene, W, H, HZ):
 
 # ── Per-pixel post-processing (numpy) ────────────────────────────────────────────
 
-def _post_np(np, pygame, screen, W, H, vignette, edge_mask, aces):
+def _post_np(np, pygame, screen, W, H, vignette, edge_mask, aces, grain=None):
     arr = pygame.surfarray.pixels3d(screen)         # (W, H, 3) uint8 view
     f = arr.astype(np.float32) / 255.0
     # Filmic tone-map (no extra exposure — the scene was over-bright)
@@ -669,8 +686,11 @@ def _post_np(np, pygame, screen, W, H, vignette, edge_mask, aces):
     b_sh = np.roll(b, -1, axis=0)
     f[..., 0] = r * (1 - edge_mask) + r_sh * edge_mask
     f[..., 2] = b * (1 - edge_mask) + b_sh * edge_mask
-    # Film grain (subtle)
-    f += (np.random.rand(W, H, 1).astype(np.float32) - 0.5) * 0.016
+    # Film grain — use pre-generated pool when available to avoid rand() each frame
+    if grain is not None:
+        f += grain
+    else:
+        f += (np.random.rand(W, H, 1).astype(np.float32) - 0.5) * 0.016
     np.clip(f, 0, 1, out=f)
     arr[:] = (f * 255).astype(np.uint8)
     del arr

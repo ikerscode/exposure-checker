@@ -1875,13 +1875,11 @@ class ScanTab:
             except Exception:
                 pass
 
-        # Sort visible cards and collapse INFO noise.
-        # Only jump to Overview on an explicit user-initiated scan, not post-fix rescans.
+        # Sort visible cards, collapse INFO noise, refresh Overview counts.
+        # Never auto-navigate — the user picks their own tab.
         self._pane.flush_info_group()
         if hasattr(self.app, "_tab_overview"):
             self.app._tab_overview.refresh()
-            if not self._post_fix_scan:
-                self.app._nb.select(self.app._tab_overview.frame)
         self._post_fix_scan = False
 
     def _finish_fix(self, success: bool):
@@ -2988,7 +2986,9 @@ class OverclockTab:
                 ["nvidia-smi",
                  "--query-gpu=clocks.gr,temperature.gpu",
                  "--format=csv,noheader,nounits"],
-                timeout=4, stderr=subprocess.DEVNULL).decode().strip()
+                timeout=4, stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            ).decode().strip()
             parts = [p.strip() for p in out.split(",")]
             if len(parts) >= 2:
                 vals["gpu_freq"] = float(parts[0])
