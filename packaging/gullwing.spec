@@ -6,8 +6,6 @@ import os
 import sys
 from PyInstaller.building.build_main import Analysis, PYZ, EXE, COLLECT, BUNDLE
 
-block_cipher = None
-
 # This spec lives in packaging/ — resolve paths from the repo root so it works
 # no matter what the current working directory is.
 ROOT = os.path.dirname(os.path.abspath(SPECPATH))
@@ -54,11 +52,10 @@ a = Analysis(
     excludes=[],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(
     pyz,

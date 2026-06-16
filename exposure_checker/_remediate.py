@@ -1,4 +1,11 @@
-"""Fix runner and interactive remediation menu."""
+"""Fix runner and interactive remediation menu.
+
+INVARIANT: Every string passed to _run_fix_cmd() must be a code literal authored
+in checks/*.py, never built from untrusted/user/env-derived input.  shell=True is
+intentional for POSIX (allows pipes and redirects in fix_cmds); Windows uses an
+explicit powershell argv list instead.  Any fix_cmd that interpolates a filesystem
+path MUST use shlex.quote() (POSIX) or _ps_quote() (PowerShell).
+"""
 
 import argparse
 import errno

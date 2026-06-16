@@ -1,0 +1,4 @@
+pyinstaller
+cryptography
+pygame-ce
+numpy
