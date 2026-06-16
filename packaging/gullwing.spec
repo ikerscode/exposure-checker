@@ -13,7 +13,7 @@ block_cipher = None
 ROOT = os.path.dirname(os.path.abspath(SPECPATH))
 
 a = Analysis(
-    [os.path.join(ROOT, 'gullwing_ui.py')],
+    [os.path.join(ROOT, 'exposure_checker', 'gui', 'app.py')],
     pathex=[ROOT],
     binaries=[],
     datas=[],
@@ -35,7 +35,9 @@ a = Analysis(
         'tkinter',
         'tkinter.ttk',
         'cryptography',
-        'gullwing_splash',
+        'exposure_checker.gui',
+        'exposure_checker.gui.app',
+        'exposure_checker.gui.splash',
         'pygame',
         'numpy',
     ],

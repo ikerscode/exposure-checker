@@ -2,8 +2,8 @@
 """
 Gullwing — desktop interface.
 
-    gullwing-ui
-    python3 gullwing_ui.py
+    gullwing-ui                          # installed entry point
+    python -m exposure_checker.gui.app   # from the repo root
 """
 import datetime
 import json
@@ -27,7 +27,6 @@ _UI_OS = platform.system()  # "Linux" | "Darwin" | "Windows"
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import exposure_checker as ec
 
 
@@ -4255,7 +4254,7 @@ def main():
     used_pygame_splash = False
     _splash_err = ""
     try:
-        import gullwing_splash
+        from exposure_checker.gui import splash as gullwing_splash
         used_pygame_splash = gullwing_splash.run_splash(version=ec.__version__)
     except Exception as _e:
         used_pygame_splash = False

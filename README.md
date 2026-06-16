@@ -28,24 +28,35 @@ Most "PC optimizers" do one thing, phone home, and ask you to trust a black box.
 > Without these it falls back to the built-in animated splash — the app works either way.
 
 
+**Recommended (all platforms):** run the installer once, then launch from your
+app menu or with the `gullwing-ui` command.
+
 ### Windows
-Double-click `gullwing_ui.py` — it will ask for admin rights, then open.
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+```
+Then run `gullwing-ui`, or launch from the Start menu.
 
 ### macOS
 ```bash
-python3 gullwing_ui.py
+bash scripts/install.sh
 ```
+Then run `gullwing-ui`, or launch Gullwing from Spotlight.
 
 ### Linux
-1. Install Python + Tkinter if you haven't already:
+1. Install Tkinter if you haven't already:
    ```bash
    sudo apt install python3-tk -y
    ```
-2. Double-click **`Gullwing.desktop`** → click **Allow Launching** the first time.  
-   Or from terminal:
+2. Run the installer, then search **Gullwing** in your app launcher:
    ```bash
-   bash launchers/run.sh
+   bash scripts/install.sh
    ```
+
+> **Run without installing** (from the repo root, using the venv):
+> ```bash
+> python -m exposure_checker.gui.app
+> ```
 
 ---
 

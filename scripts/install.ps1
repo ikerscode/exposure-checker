@@ -34,13 +34,16 @@ Write-Host "[1/3] Creating virtual environment..."
 & python -m venv $venv
 
 Write-Host "[2/3] Installing dependencies..."
-& "$venv\Scripts\pip.exe" install --quiet -e $repo
+# Install with the cinematic-splash extra; fall back to base if the
+# pygame/numpy wheels aren't available for this Python.
+& "$venv\Scripts\pip.exe" install --quiet -e "$repo[splash]"
+if ($LASTEXITCODE -ne 0) { & "$venv\Scripts\pip.exe" install --quiet -e $repo }
 
 Write-Host "[3/3] Creating launcher..."
 $appsDir = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
 $launcher = @"
 @echo off
-"$venv\Scripts\python.exe" "$repo\gullwing_ui.py" %*
+"$venv\Scripts\python.exe" -m exposure_checker.gui.app %*
 "@
 Set-Content -Path "$appsDir\gullwing.cmd" -Value $launcher
 

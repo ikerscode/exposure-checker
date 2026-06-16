@@ -71,4 +71,4 @@ esac
 echo ""
 echo "Done!"
 echo "  • Search 'Gullwing' in your app launcher and double-click it"
-echo "  • Or run from terminal: python3 \"$REPO/gullwing_ui.py\""
+echo "  • Or run from terminal:  gullwing-ui"

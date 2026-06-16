@@ -29,13 +29,7 @@ splash = [
 
 [project.scripts]
 gullwing    = "exposure_checker:main"
-gullwing-ui = "gullwing_ui:main"
-
-[tool.setuptools]
-# Top-level scripts must be exposed as modules or the `gullwing-ui` entry point
-# (gullwing_ui:main) fails with ModuleNotFoundError when run from anywhere but
-# the repo directory.
-py-modules = ["gullwing_ui", "gullwing_splash"]
+gullwing-ui = "exposure_checker.gui.app:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
