@@ -4233,6 +4233,16 @@ def _show_splash(root):
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def main():
+    if "--smoke" in sys.argv:
+        import exposure_checker as ec
+        from exposure_checker import _core, _remediate, _storage, _report, _schedule, _notify, _cli
+        from exposure_checker.checks import (
+            security, performance, cleaner, portscan, benchmark, overclock,
+        )
+        from exposure_checker.gui import splash
+        print(f"gullwing {ec.__version__} smoke ok")
+        raise SystemExit(0)
+
     # When the frozen app is re-invoked by a scheduled scan (or run from a
     # terminal with CLI args), delegate to the scanner's command-line handler
     # instead of opening the GUI. Without this, `exposure-checker headless`

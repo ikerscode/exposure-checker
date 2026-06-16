@@ -53,6 +53,22 @@ jobs:
       - name: Build app
         run: pyinstaller packaging/gullwing.spec
 
+      # ── Smoke-test the built artifact ─────────────────────────────────────────
+      # Building with the package pip-installed always resolves imports at build
+      # time, so a frozen binary that fails to resolve imports at runtime would
+      # still build green. Run the artifact itself to catch that.
+      - name: Smoke-test built binary (Linux)
+        if: runner.os == 'Linux'
+        run: ./dist/Gullwing --smoke
+
+      - name: Smoke-test built binary (Windows)
+        if: runner.os == 'Windows'
+        run: ./dist/Gullwing.exe --smoke
+
+      - name: Smoke-test built binary (macOS)
+        if: runner.os == 'macOS'
+        run: ./dist/Gullwing.app/Contents/MacOS/Gullwing --smoke
+
       # ── macOS: wrap in .dmg ───────────────────────────────────────────────────
       - name: Package macOS .dmg
         if: runner.os == 'macOS'
