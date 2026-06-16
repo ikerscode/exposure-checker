@@ -12,6 +12,13 @@ block_cipher = None
 # no matter what the current working directory is.
 ROOT = os.path.dirname(os.path.abspath(SPECPATH))
 
+# Single source of truth for the version: read it textually from _core.py so the
+# bundle metadata can't drift from exposure_checker.__version__. Read, don't
+# import, to avoid import side effects at spec-exec time.
+import re
+with open(os.path.join(ROOT, 'exposure_checker', '_core.py')) as _vf:
+    _VERSION = re.search(r'__version__\s*=\s*["\']([^"\']+)', _vf.read()).group(1)
+
 a = Analysis(
     [os.path.join(ROOT, 'exposure_checker', 'gui', 'app.py')],
     pathex=[ROOT],
@@ -82,8 +89,8 @@ app = BUNDLE(
     icon=None,
     bundle_identifier='com.gullwing.app',
     info_plist={
-        'CFBundleShortVersionString': '1.0.8',
-        'CFBundleVersion': '1.0.8',
+        'CFBundleShortVersionString': _VERSION,
+        'CFBundleVersion': _VERSION,
         'NSHighResolutionCapable': True,
         'NSRequiresAquaSystemAppearance': False,
     },

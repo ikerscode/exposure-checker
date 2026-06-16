@@ -17,7 +17,27 @@ on:
       - "v*"
 
 jobs:
+  version-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must match __version__
+        run: |
+          CODE="$(python3 - <<'PY'
+          import re, pathlib
+          s = pathlib.Path("exposure_checker/_core.py").read_text()
+          print(re.search(r'__version__\s*=\s*["\']([^"\']+)', s).group(1))
+          PY
+          )"
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "release tag = $TAG   __version__ = $CODE"
+          if [ "$TAG" != "$CODE" ]; then
+            echo "::error::Release tag v$TAG does not match exposure_checker.__version__ ($CODE). Bump __version__ in exposure_checker/_core.py to match the tag, or retag." >&2
+            exit 1
+          fi
+
   build:
+    needs: version-guard
     strategy:
       fail-fast: false
       matrix:
