@@ -2,7 +2,7 @@
 Version=1.0.8
 Name=Gullwing
 Comment=Tune it. Lock it. Send it.
-Exec=bash -c 'python3 "$(dirname "$(dirname "$(realpath "%k")")")/gullwing_ui.py"'
+Exec=bash -c 'R="$(dirname "$(dirname "$(realpath "%k")")")"; P="$R/.venv/bin/python"; [ -x "$P" ] || P=python3; exec "$P" "$R/gullwing_ui.py"'
 Icon=utilities-system-monitor
 Terminal=false
 Type=Application

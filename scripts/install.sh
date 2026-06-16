@@ -47,7 +47,7 @@ cat > "$DESKTOP_FILE" << EOF
 Version=1.0.8
 Name=Gullwing
 Comment=Tune it. Lock it. Send it.
-Exec=python3 "$REPO/gullwing_ui.py"
+Exec=$HOME/.local/bin/gullwing-ui
 Icon=utilities-system-monitor
 Terminal=false
 Type=Application
