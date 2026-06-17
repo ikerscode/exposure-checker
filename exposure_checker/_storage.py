@@ -23,13 +23,32 @@ _ACCEPTED_FILE = os.path.join(_EC_DATA_DIR, "accepted_risks.json")
 
 _SESSION_TTL_DAYS = 7
 
-_SNAPSHOT_CAPTURED_FILES = [
-    "/etc/ssh/sshd_config",
-    "/etc/ufw/user.rules",
-    "/etc/ufw/user6.rules",
-    "/etc/sysctl.conf",
-    "/etc/hosts",
-]
+def _snapshot_files_for_os():
+    """Config files worth capturing before a fix, per platform.
+
+    The revert system can only restore files it captured, so this list is
+    OS-specific: Linux fixes edit sshd/ufw/sysctl; Windows has none of those
+    paths (its fixes are registry/service changes the snapshot can't track),
+    so we capture only the hosts file it actually has.
+    """
+    if _OS == "Windows":
+        sysroot = os.environ.get("SystemRoot", r"C:\Windows")
+        return [os.path.join(sysroot, "System32", "drivers", "etc", "hosts")]
+    if _OS == "Darwin":
+        return [
+            "/etc/ssh/sshd_config",
+            "/etc/hosts",
+            "/etc/pf.conf",
+        ]
+    return [
+        "/etc/ssh/sshd_config",
+        "/etc/ufw/user.rules",
+        "/etc/ufw/user6.rules",
+        "/etc/sysctl.conf",
+        "/etc/hosts",
+    ]
+
+_SNAPSHOT_CAPTURED_FILES = _snapshot_files_for_os()
 
 def save_scan_history(tab: str, score: int, grade: str, counts: dict) -> None:
     d = os.path.join(_HISTORY_DIR, tab.lower())
@@ -196,6 +215,11 @@ def take_snapshot(label=""):
         try:
             with open(path) as fh:
                 snap["files"][path] = fh.read()
+        except FileNotFoundError:
+            # Not present on this system — nothing to capture, not a failure.
+            # Leaving it out of the dict lets before_fix() tell "no state to
+            # back up here" apart from "exists but unreadable" (a perms issue).
+            pass
         except OSError:
             snap["files"][path] = None
 

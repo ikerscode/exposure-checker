@@ -984,19 +984,34 @@ class _SessionTracker:
             snap = ec.take_snapshot(label=f"before: {label}")
         except Exception:
             return False
-        # A snapshot with nothing captured is useless — every file read failed
-        # and no firewall data was obtained.
-        has_files = any(v is not None for v in snap.get("files", {}).values())
-        has_net   = bool(snap.get("ufw_status") or snap.get("ufw_rules"))
-        if not has_files and not has_net:
+        files    = snap.get("files", {})
+        captured = any(v is not None for v in files.values())
+        has_net  = bool(snap.get("ufw_status") or snap.get("ufw_rules"))
+
+        if captured or has_net:
+            # Real state captured — record it so the fix can be reverted.
+            self._snaps.append((label, snap))
+            # Persist to disk on the first snap in this session so an abrupt
+            # kill leaves a recoverable manifest.
+            if not self._session_ts:
+                import datetime as _dt
+                self._session_ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+            ec.write_session_manifest(self._session_ts, label, snap)
+            return True
+
+        # On Linux/macOS the captured files ARE what the fixes edit, so if they
+        # exist on disk but came back as None (present but unreadable, e.g.
+        # permission denied) a later revert would fail — abort to protect the
+        # user's config. On Windows the captured hosts file is unrelated to the
+        # registry/service fixes being applied, so an unreadable hosts file must
+        # never block a fix.
+        if _UI_OS != "Windows" and any(v is None for v in files.values()):
             return False
-        self._snaps.append((label, snap))
-        # Persist to disk on the first snap in this session so an abrupt kill
-        # leaves a recoverable manifest.
-        if not self._session_ts:
-            import datetime as _dt
-            self._session_ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        ec.write_session_manifest(self._session_ts, label, snap)
+
+        # Nothing on this system to snapshot (e.g. Windows fixes are registry/
+        # service changes the snapshot system doesn't track). The fix isn't
+        # revertable, but there's nothing to protect — let it proceed instead
+        # of blocking the user outright.
         return True
 
     @property
