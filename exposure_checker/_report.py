@@ -180,11 +180,17 @@ _SCORE_WEIGHTS = {"CRITICAL": 25, "HIGH": 10, "MEDIUM": 3, "REVIEW": 1, "INFO": 
 
 
 def _compute_score(report_data):
-    """Return (score 0–100, grade A–F). Each finding deducts weighted points."""
+    """Return (score 0–100, grade A–F).
+
+    Only findings with actionable fix_cmds deduct points — unfixable or
+    informational findings (no fix_cmds) are shown but don't penalise the score,
+    so users can always achieve a high score by acting on what the app can fix.
+    """
     deductions = 0
     for check in report_data.get("checks", []):
         for f in check.get("findings", []):
-            deductions += _SCORE_WEIGHTS.get(f.get("severity", ""), 0)
+            if f.get("fix_cmds"):  # skip unfixable / informational findings
+                deductions += _SCORE_WEIGHTS.get(f.get("severity", ""), 0)
     score = max(0, 100 - deductions)
     if score >= 90:   grade = "A"
     elif score >= 75: grade = "B"
