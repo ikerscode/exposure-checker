@@ -28,6 +28,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import exposure_checker as ec
+from exposure_checker.gui import theme as T
 
 
 def _enable_windows_dpi_awareness():
@@ -51,39 +52,14 @@ def _enable_windows_dpi_awareness():
 
 _enable_windows_dpi_awareness()
 
-# ── Palette ────────────────────────────────────────────────────────────────────
+# ── Palette (design system) ───────────────────────────────────────────────────
 
-C = {
-    "bg":         "#080c12",   # deep space black
-    "panel":      "#0e1620",   # elevated surface
-    "input":      "#162030",
-    "border":     "#1e2d3d",
-    "text":       "#edf2fa",   # clean white-blue text
-    "muted":      "#5a6a7a",
-    "accent":     "#00d4ff",   # electric cyan
-    "accent2":    "#0096cc",   # deeper cyan for pressed
-    "neon":       "#9d6cff",   # electric purple for easter eggs / specials
-    "CRITICAL":   "#ff4455",
-    "HIGH":       "#ff8822",
-    "MEDIUM":     "#ffcc00",
-    "REVIEW":     "#5a7088",
-    "INFO":       "#2a3d52",
-    "ok":         "#00e87a",   # neon green
-    "err":        "#ff4455",
-    "cmd":        "#00d4ff",
-    "hdr":        "#cc88ff",   # vivid purple for section headers
-    "log_bg":     "#04080f",
-    "radar_bg":   "#030e0b",
-    "radar_grid": "#081d15",
-    "hdr_bg":     "#080c12",   # header matches deep bg
-    "pill":       "#10182a",   # badge background
-    "scan_glow":  "#00d4ff",   # used for pulse on scan button
-}
+C = T.C
 
 _SEV_ORDER   = ["CRITICAL", "HIGH", "MEDIUM", "REVIEW", "INFO"]
 _GRADE_COLOR = {
-    "A": "#00e87a", "B": "#00d4ff",
-    "C": "#ffcc00", "D": "#ff8822", "F": "#ff4455", "—": "#5a6a7a",
+    "A": T.OK,         "B": T.DATA,
+    "C": T.SEV_MEDIUM, "D": T.SEV_HIGH, "F": T.SEV_CRITICAL, "—": T.TEXT_DIM,
 }
 _GRADE_LABEL = {
     "A": "EXCELLENT", "B": "GOOD",
@@ -178,6 +154,10 @@ def _configure_style(root):
     s.map("TNotebook.Tab",
           background=[("selected", bg)],
           foreground=[("selected", text)])
+
+    # Hidden-tab notebook style (tabs replaced by left nav rail)
+    s.layout("NoTabs.TNotebook.Tab", [])
+    s.configure("NoTabs.TNotebook", background=bg, tabmargins=[0, 0, 0, 0])
 
 
 # ── CenterStage ────────────────────────────────────────────────────────────────
@@ -3231,105 +3211,77 @@ class App:
         r = self.root
         self._tracker = _SessionTracker()
 
-        # ── Header ────────────────────────────────────────────────────────────
+        # ── Header (frame-based) ──────────────────────────────────────────────
         HDR_H = 68
-        _HB = C["hdr_bg"]
-        hdr_canvas = tk.Canvas(r, height=HDR_H, bg=_HB,
-                                highlightthickness=0)
-        hdr_canvas.pack(fill=tk.X)
-        self._hdr_pulse = 0.0   # for animated bottom accent bar
+        hdr = tk.Frame(r, bg=C["bg"], height=HDR_H)
+        hdr.pack(fill=tk.X)
+        hdr.pack_propagate(False)
+        tk.Frame(hdr, bg=C["border"], height=1).pack(side=tk.TOP, fill=tk.X)
+        tk.Frame(hdr, bg=C["accent"], height=2).pack(side=tk.BOTTOM, fill=tk.X)
 
-        def _paint_hdr(event=None):
-            w = hdr_canvas.winfo_width()
-            if w < 2:
-                return
-            hdr_canvas.delete("bg")
-            # Base fill
-            hdr_canvas.create_rectangle(0, 0, w, HDR_H,
-                fill=_HB, outline="", tags="bg")
+        # Right: version + privilege pill (packed first to anchor it right)
+        priv    = "ADMIN" if _is_root() else "STANDARD"
+        priv_fg = C["ok"] if _is_root() else C["muted"]
+        pill = tk.Frame(hdr, bg=C["pill"], highlightthickness=1,
+                        highlightbackground=C["border"])
+        tk.Label(pill, text=f"v{ec.__version__}", bg=C["pill"], fg=C["muted"],
+                 font=("TkDefaultFont", 8), padx=6, pady=2).pack(side=tk.LEFT)
+        tk.Label(pill, text="•", bg=C["pill"], fg=C["border"],
+                 font=("TkDefaultFont", 8)).pack(side=tk.LEFT)
+        tk.Label(pill, text=priv, bg=C["pill"], fg=priv_fg,
+                 font=("TkDefaultFont", 8, "bold"), padx=6, pady=2).pack(side=tk.LEFT)
+        pill.pack(side=tk.RIGHT, padx=14)
 
-            # Subtle dot-grid pattern across header — gives depth without noise
-            dot_spacing = 22
-            for gx in range(0, w + dot_spacing, dot_spacing):
-                for gy in range(0, HDR_H + dot_spacing, dot_spacing):
-                    hdr_canvas.create_rectangle(
-                        gx, gy, gx + 1, gy + 1,
-                        fill="#141e2c", outline="", tags="bg"
-                    )
+        # Left: icon mark + title
+        left_hdr = tk.Frame(hdr, bg=C["bg"])
+        left_hdr.pack(side=tk.LEFT, fill=tk.Y, padx=(16, 0))
 
-            # Multi-layer radial glow: cyan (right) + subtle purple (centre-left)
-            for gi, (cx_off, rad_mult, r_hex, g_hex, b_hex) in enumerate((
-                (0,     1.0, 0x00, 0x80, 0xaa),   # cyan right glow
-                (-0.4,  0.6, 0x40, 0x18, 0x60),   # purple centre glow
-            )):
-                for k in (0.06, 0.040, 0.022):
-                    pad = int((60 + gi * 40) * rad_mult)
-                    rr = min(int(r_hex * k * 6), 40)
-                    gg = min(int(g_hex * k * 6), 0xd0)
-                    bb = min(int(b_hex * k * 6), 0xff)
-                    ox = int(w * (0.82 + cx_off))
-                    hdr_canvas.create_oval(
-                        ox - pad, HDR_H - pad // 2,
-                        ox + pad // 2, HDR_H + pad,
-                        fill=f"#{rr:02x}{gg:02x}{bb:02x}",
-                        outline="", tags="bg"
-                    )
+        # Gull icon (icon-header.png → diamond polygon fallback)
+        _icon_loaded = False
+        try:
+            from PIL import Image as _PilImage, ImageTk as _ImageTk
+            _ico_path = T._asset_path("icons/icon-header.png")
+            if os.path.isfile(_ico_path):
+                _pil    = _PilImage.open(_ico_path).convert("RGBA")
+                _tk_img = _ImageTk.PhotoImage(_pil)
+                _ico_lbl = tk.Label(left_hdr, image=_tk_img, bg=C["bg"])
+                _ico_lbl.image = _tk_img
+                _ico_lbl.pack(side=tk.LEFT, padx=(0, 10), pady=14)
+                _icon_loaded = True
+        except Exception:
+            pass
+        if not _icon_loaded:
+            _logo = tk.Canvas(left_hdr, width=32, height=32,
+                              bg=C["bg"], highlightthickness=0)
+            _logo.create_polygon(16, 1, 31, 16, 16, 31, 1, 16,
+                                 fill=C["accent"], outline="")
+            _logo.create_polygon(16, 8, 24, 16, 16, 24, 8, 16,
+                                 fill=C["neon"], outline="")
+            _logo.pack(side=tk.LEFT, padx=(0, 10), pady=14)
 
-            # Animated pulsing bottom accent bar (two-segment: cyan + purple)
-            pulse = 0.5 + 0.5 * math.sin(self._hdr_pulse)
-            split = int(w * (0.55 + 0.10 * pulse))
-            hdr_canvas.create_rectangle(0, HDR_H - 2, split, HDR_H,
-                fill=C["accent"], outline="", tags="bg")
-            hdr_canvas.create_rectangle(split, HDR_H - 2, w, HDR_H,
-                fill=C["neon"], outline="", tags="bg")
-
-            # Hairline top border for depth
-            hdr_canvas.create_rectangle(0, 0, w, 1,
-                fill="#1a2840", outline="", tags="bg")
-
-            hdr_canvas.tag_lower("bg")
-
-        def _pulse_hdr():
-            self._hdr_pulse = (self._hdr_pulse + 0.04) % (2 * math.pi)
-            _paint_hdr()
-            hdr_canvas.after(50, _pulse_hdr)
-
-        hdr_canvas.bind("<Configure>", _paint_hdr)
-        hdr_canvas.after(10, _pulse_hdr)
-
-        # Diamond logo (two-tone: cyan + neon purple inner)
-        logo = tk.Canvas(hdr_canvas, width=32, height=32,
-                         bg=_HB, highlightthickness=0)
-        hdr_canvas.create_window(18, HDR_H // 2, window=logo, anchor="w")
-        logo.create_polygon(16, 1, 31, 16, 16, 31, 1, 16,
-                            fill=C["accent"], outline="")
-        logo.create_polygon(16, 8, 24, 16, 16, 24, 8, 16,
-                            fill=C["neon"], outline="")
-
-        # Title block
-        title_f = tk.Frame(hdr_canvas, bg=_HB)
-        hdr_canvas.create_window(60, HDR_H // 2, window=title_f, anchor="w")
-        title_row = tk.Frame(title_f, bg=_HB)
+        # Title
+        title_f = tk.Frame(left_hdr, bg=C["bg"])
+        title_f.pack(side=tk.LEFT, fill=tk.Y, pady=14)
+        title_row = tk.Frame(title_f, bg=C["bg"])
         title_row.pack(anchor="w")
         tk.Label(title_row, text="GULLWING",
-                 bg=_HB, fg=C["text"],
+                 bg=C["bg"], fg=C["text"],
                  font=("TkDefaultFont", 13, "bold")).pack(side=tk.LEFT)
         tk.Label(title_row, text=f"  v{ec.__version__}",
-                 bg=_HB, fg=C["accent"],
+                 bg=C["bg"], fg=C["accent"],
                  font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT)
         tk.Label(title_f, text="Tune it. Lock it. Send it.",
-                 bg=_HB, fg=C["muted"],
+                 bg=C["bg"], fg=C["muted"],
                  font=("TkDefaultFont", 7)).pack(anchor="w")
 
-        # Animated seagull mascot (right of title)
+        # Animated seagull mascot
         GULL_W, GULL_H = 100, 64
-        self._hdr_gull = tk.Canvas(hdr_canvas, width=GULL_W, height=GULL_H,
-                                    bg=_HB, highlightthickness=0)
-        hdr_canvas.create_window(310, HDR_H // 2,
-                                  window=self._hdr_gull, anchor="w")
-        self._hdr_gull_phase = 0.0
+        self._hdr_gull = tk.Canvas(hdr, width=GULL_W, height=GULL_H,
+                                    bg=C["bg"], highlightthickness=0)
+        self._hdr_gull.pack(side=tk.LEFT, padx=16)
+        self._hdr_gull_phase  = 0.0
         self._gull_boost_until = 0
-        self._gull_click_times: list = []   # for rapid-click easter egg
+        self._gull_click_times: list = []
         self._konami_seq: list = []
         self._hdr_gull.bind("<Button-1>",        lambda _e: self._gull_check_in())
         self._hdr_gull.bind("<Double-Button-1>", lambda _e: self._gull_summon_golden())
@@ -3338,34 +3290,12 @@ class App:
         self._hdr_gull.bind("<Leave>",  lambda _e: self._hdr_gull.configure(cursor=""))
         self._animate_hdr_gull()
 
-        # Konami code listener (↑↑↓↓←→←→ba → flock mode)
+        # Konami code listener
         self.root.bind("<Key>", self._konami_check)
 
         # Ambient seagull state
-        self._ambient_tops: list = []   # active Toplevel gull windows
+        self._ambient_tops: list = []
         self._schedule_ambient_gull()
-
-        # Version + privilege pill (pinned right)
-        priv = "ADMIN" if _is_root() else "STANDARD"
-        priv_fg = C["ok"] if _is_root() else C["muted"]
-        pill = tk.Frame(hdr_canvas, bg=C["pill"], highlightthickness=1,
-                        highlightbackground=C["border"])
-        tk.Label(pill, text=f"v{ec.__version__}", bg=C["pill"], fg=C["muted"],
-                 font=("TkDefaultFont", 8), padx=6, pady=2).pack(side=tk.LEFT)
-        tk.Label(pill, text="•", bg=C["pill"], fg=C["border"],
-                 font=("TkDefaultFont", 8)).pack(side=tk.LEFT)
-        tk.Label(pill, text=priv, bg=C["pill"], fg=priv_fg,
-                 font=("TkDefaultFont", 8, "bold"), padx=6, pady=2).pack(side=tk.LEFT)
-        self._hdr_ver_win = hdr_canvas.create_window(
-            9999, HDR_H // 2, window=pill, anchor="e")
-
-        def _pin_ver(event=None):
-            hdr_canvas.coords(self._hdr_ver_win,
-                               hdr_canvas.winfo_width() - 14, HDR_H // 2)
-
-        hdr_canvas.bind("<Configure>",
-                         lambda e: (_paint_hdr(e), _pin_ver(e)))
-        hdr_canvas.after(20, _pin_ver)
 
         # ── Target / TLS bar ──────────────────────────────────────────────────
         ctrl = tk.Frame(r, bg=C["bg"])
@@ -3387,9 +3317,16 @@ class App:
         ctrl.grid_columnconfigure(0, weight=1)
         ctrl.grid_columnconfigure(2, weight=1)
 
-        # Notebook with scan tabs
-        self._nb = ttk.Notebook(r)
-        self._nb.pack(fill=tk.BOTH, expand=True, padx=16, pady=(6, 0))
+        # ── Tab content: nav rail (left) + notebook (right) ─────────────────
+        _nb_area = tk.Frame(r, bg=C["bg"])
+        _nb_area.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+
+        self._nav_rail = tk.Frame(_nb_area, bg=T.SURFACE, width=92)
+        self._nav_rail.pack(side=tk.LEFT, fill=tk.Y, padx=(16, 0))
+        self._nav_rail.pack_propagate(False)
+
+        self._nb = ttk.Notebook(_nb_area, style="NoTabs.TNotebook")
+        self._nb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 16))
 
         self._tab_overview = OverviewTab(self._nb, self)
 
@@ -3411,6 +3348,10 @@ class App:
         self._tab_benchmark = BenchmarkTab(self._nb, self)
         self._tab_overclock = OverclockTab(self._nb, self)
         self._tab_snapshots = SnapshotsTab(self._nb, self)
+
+        # Populate nav rail now that all tab frames exist
+        self._populate_nav_rail()
+        self._nb.bind("<<NotebookTabChanged>>", self._update_nav_rail)
 
         # Start on the Security tab — the Overview is a place users navigate to,
         # not the default landing tab.
@@ -3506,6 +3447,71 @@ class App:
             sb, text="", bg=C["panel"], fg=C["muted"],
             font=("TkDefaultFont", 8), padx=10)
         self._last_scan_lbl.pack(side=tk.RIGHT, pady=7)
+
+    # ── Nav rail ──────────────────────────────────────────────────────────────
+
+    def _populate_nav_rail(self):
+        _NAV_ITEMS = [
+            ("◈", "Overview",    lambda: self._tab_overview.frame),
+            ("🔒", "Security",   lambda: self._tab_security.frame),
+            ("🛡", "Antivirus",  lambda: self._tab_antivirus.frame),
+            ("⚡", "Performance", lambda: self._tab_performance.frame),
+            ("🔐", "Protection", lambda: self._tab_protection.frame),
+            ("🧹", "Cleaner",    lambda: self._tab_cleaner.frame),
+            ("📊", "Benchmark",  lambda: self._tab_benchmark.frame),
+            ("🔧", "Overclock",  lambda: self._tab_overclock.frame),
+            ("⊞", "Snapshots",  lambda: self._tab_snapshots.frame),
+        ]
+        self._nav_btns: dict = {}   # frame widget → nav button label
+
+        # Thin top padding
+        tk.Frame(self._nav_rail, bg=T.SURFACE, height=8).pack(fill=tk.X)
+
+        for icon, label, frame_fn in _NAV_ITEMS:
+            frame = frame_fn()
+            btn = tk.Label(
+                self._nav_rail,
+                text=f"{icon}\n{label}",
+                bg=T.SURFACE, fg=T.TEXT_MUTED,
+                font=("TkDefaultFont", 8),
+                cursor="hand2", anchor="center",
+                justify=tk.CENTER,
+                pady=6,
+            )
+            btn.pack(fill=tk.X, padx=4, pady=1)
+            btn.bind("<Button-1>",  lambda _e, f=frame: self._nb.select(f))
+            btn.bind("<Enter>",     lambda _e, b=btn: b.configure(fg=T.TEXT))
+            btn.bind("<Leave>",     lambda _e, b=btn: self._refresh_nav_btn(b))
+            self._nav_btns[str(frame)] = btn
+
+        # Thin bottom rule
+        tk.Frame(self._nav_rail, bg=T.BORDER, height=1).pack(
+            fill=tk.X, padx=4, pady=(4, 0))
+
+        self._update_nav_rail()
+
+    def _refresh_nav_btn(self, btn: tk.Label):
+        """Restore a nav button to its correct active/muted state."""
+        selected = self._nb.select()
+        is_active = any(
+            str(f) == selected and b is btn
+            for f, b in self._nav_btns.items()
+        )
+        btn.configure(
+            fg=T.ACCENT if is_active else T.TEXT_MUTED,
+            bg=T.BG    if is_active else T.SURFACE,
+        )
+
+    def _update_nav_rail(self, _event=None):
+        """Sync nav rail highlight to the currently selected notebook tab."""
+        selected = self._nb.select()
+        for frame_id, btn in self._nav_btns.items():
+            if frame_id == selected:
+                btn.configure(fg=T.ACCENT, bg=T.BG,
+                               font=("TkDefaultFont", 8, "bold"))
+            else:
+                btn.configure(fg=T.TEXT_MUTED, bg=T.SURFACE,
+                               font=("TkDefaultFont", 8))
 
     # ── Seagull animation ─────────────────────────────────────────────────────
 
@@ -4785,6 +4791,7 @@ def main():
 
     root = tk.Tk()
     root.withdraw()
+    T.load_fonts()
     # On HiDPI Windows, sync Tk's logical scaling to the real DPI so fonts and
     # canvas geometry match the crispness we enabled at process level.
     if _UI_OS == "Windows":

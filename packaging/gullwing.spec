@@ -17,11 +17,19 @@ import re
 with open(os.path.join(ROOT, 'exposure_checker', '_core.py')) as _vf:
     _VERSION = re.search(r'__version__\s*=\s*["\']([^"\']+)', _vf.read()).group(1)
 
+_ASSETS_SRC = os.path.join(ROOT, 'exposure_checker', 'gui', 'assets')
+_ASSETS_DEST = os.path.join('exposure_checker', 'gui', 'assets')
+
+_ICO_PATH  = os.path.join(_ASSETS_SRC, 'icons', 'icon.ico')
+_ICNS_PATH = os.path.join(_ASSETS_SRC, 'icons', 'icon.icns')
+
 a = Analysis(
     [os.path.join(ROOT, 'exposure_checker', 'gui', 'app.py')],
     pathex=[ROOT],
     binaries=[],
-    datas=[],
+    datas=[
+        (_ASSETS_SRC, _ASSETS_DEST),
+    ],
     hiddenimports=[
         'exposure_checker',
         'exposure_checker._core',
@@ -45,6 +53,11 @@ a = Analysis(
         'exposure_checker.gui.splash',
         'pygame',
         'numpy',
+        'customtkinter',
+        'PIL',
+        'PIL.Image',
+        'PIL.ImageTk',
+        'PIL.ImageDraw',
     ],
     hookspath=[],
     hooksconfig={},
@@ -77,13 +90,14 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=_ICO_PATH if os.path.isfile(_ICO_PATH) else None,
 )
 
 # macOS .app bundle
 app = BUNDLE(
     exe,
     name='Gullwing.app',
-    icon=None,
+    icon=_ICNS_PATH if os.path.isfile(_ICNS_PATH) else None,
     bundle_identifier='com.gullwing.app',
     info_plist={
         'CFBundleShortVersionString': _VERSION,

@@ -9,7 +9,9 @@ description = "Self-hosted security scanner: port scan, SSH audit, auth log anal
 requires-python = ">=3.9"
 license = { text = "MIT" }
 dependencies = [
-    "cryptography>=38",   # TLS certificate expiry (check_tls)
+    "cryptography>=38",      # TLS certificate expiry (check_tls)
+    "customtkinter>=5.2",    # FontManager for bundled OFL fonts
+    "pillow>=9.0",           # icon loading (ImageTk) + icon generation
 ]
 
 [project.optional-dependencies]
@@ -40,7 +42,7 @@ where = ["."]
 include = ["exposure_checker*"]
 
 [tool.setuptools.package-data]
-"*" = ["*.py"]
+"exposure_checker" = ["gui/assets/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
