@@ -646,14 +646,16 @@ class _UIReporter(ec._Reporter):
 
     def finding(self, severity, label, why, fix, fix_cmds=None, **extra):
         super().finding(severity, label, why, fix, fix_cmds=fix_cmds, **extra)
-        self._q.put(("finding", {
+        record = {
             "check":    self._cur["check"] if self._cur else "",
             "severity": severity,
             "label":    label,
             "why":      why,
             "fix":      fix,
             "fix_cmds": fix_cmds or [],
-        }))
+        }
+        record.update(extra)   # pass revertable=False and other metadata to the UI
+        self._q.put(("finding", record))
 
 
 # ── Privilege / batch-fix helpers ─────────────────────────────────────────────
@@ -1394,6 +1396,10 @@ class _FindingsPane:
             tk.Label(top, text="  Accepted risk",
                      bg=card_bg, fg=C["ok"],
                      font=("TkDefaultFont", 7, "bold")).pack(side=tk.LEFT)
+        elif f.get("revertable") is False:
+            tk.Label(top, text="  Cannot be undone",
+                     bg=card_bg, fg=C["muted"],
+                     font=("TkDefaultFont", 7)).pack(side=tk.LEFT)
 
         title_fg = C["muted"] if accepted else C["text"]
         tk.Label(body, text=f.get("label", ""),
@@ -1532,12 +1538,13 @@ class ScanTab:
     """One notebook tab: CenterStage + severity bars + findings cards + fix flow."""
 
     def __init__(self, notebook, title, score_label, app, run_fn,
-                 session_tracker=None):
+                 session_tracker=None, revertable=True):
         self._title       = title
         self._score_label = score_label
         self.app          = app
         self._run_fn      = run_fn
-        self._tracker     = session_tracker
+        self._tracker     = session_tracker if revertable else None
+        self._revertable  = revertable
 
         self._q:             queue.Queue = queue.Queue()
         self._findings:      list        = []
@@ -3400,7 +3407,7 @@ class App:
             session_tracker=self._tracker)
         self._tab_cleaner   = ScanTab(
             self._nb, "Cleaner",   "Clean status",   self, self._run_cleaner,
-            session_tracker=self._tracker)
+            session_tracker=self._tracker, revertable=False)
         self._tab_benchmark = BenchmarkTab(self._nb, self)
         self._tab_overclock = OverclockTab(self._nb, self)
         self._tab_snapshots = SnapshotsTab(self._nb, self)

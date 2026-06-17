@@ -92,6 +92,7 @@ def _check_system_cleaner_windows(reporter):
                     f"Remove-Item -Path '{user_temp}\\*' -Recurse -Force "
                     "-ErrorAction SilentlyContinue"
                 ],
+                revertable=False,
             )
             found_any = True
 
@@ -109,6 +110,7 @@ def _check_system_cleaner_windows(reporter):
                     r"Remove-Item -Path 'C:\Windows\Temp\*' -Recurse -Force "
                     "-ErrorAction SilentlyContinue"
                 ],
+                revertable=False,
             )
             found_any = True
 
@@ -128,6 +130,7 @@ def _check_system_cleaner_windows(reporter):
                     "-ErrorAction SilentlyContinue",
                     "net start wuauserv",
                 ],
+                revertable=False,
             )
             found_any = True
 
@@ -153,6 +156,7 @@ def _check_system_cleaner_windows(reporter):
                 fix_cmds=[
                     f"Remove-Item -Path '{d}\\*.dmp' -Force -ErrorAction SilentlyContinue"
                 ],
+                revertable=False,
             )
             found_any = True
 
@@ -170,6 +174,7 @@ def _check_system_cleaner_windows(reporter):
                 f"Recycle Bin contains {rb_mb} MB of deleted files not yet purged.",
                 "Empty the Recycle Bin.",
                 fix_cmds=["Clear-RecycleBin -Force -ErrorAction SilentlyContinue"],
+                revertable=False,
             )
             found_any = True
     except (ValueError, TypeError):
@@ -189,6 +194,7 @@ def _check_system_cleaner_windows(reporter):
                 "Windows Delivery Optimization stores update downloads for peer sharing — safe to clear.",
                 "Run: Delete-DeliveryOptimizationCache -Force",
                 fix_cmds=["Delete-DeliveryOptimizationCache -Force -ErrorAction SilentlyContinue"],
+                revertable=False,
             )
             found_any = True
 
@@ -226,6 +232,7 @@ def check_system_cleaner(reporter):
                 f"/var/cache/apt/archives holds {mb} MB of downloaded .deb files.",
                 "Run: sudo apt-get clean",
                 fix_cmds=["apt-get clean"],
+                revertable=False,
             )
             found_any = True
 
@@ -319,6 +326,7 @@ def check_system_cleaner(reporter):
                         "Journal logs accumulate over time. Vacuum to 200 MB.",
                         "Run: sudo journalctl --vacuum-size=200M",
                         fix_cmds=["journalctl --vacuum-size=200M"],
+                        revertable=False,
                     )
                     found_any = True
         except (subprocess.TimeoutExpired, OSError):
@@ -339,6 +347,7 @@ def check_system_cleaner(reporter):
             "Crash core dumps from failed applications accumulate in /var/crash.",
             "Run: sudo rm -rf /var/crash/*",
             fix_cmds=["rm -rf /var/crash/*"],
+            revertable=False,
         )
         found_any = True
 
@@ -357,6 +366,7 @@ def check_system_cleaner(reporter):
             "Leftover config debris from package upgrades clutter /etc.",
             "Delete *.dpkg-old and *.dpkg-dist files in /etc.",
             fix_cmds=cmds,
+            revertable=False,
         )
         found_any = True
 
@@ -384,6 +394,7 @@ def check_system_cleaner(reporter):
             "Files > 10 MB in /tmp or /var/tmp not touched in 7+ days.",
             "Remove old temp files.",
             fix_cmds=cmds,
+            revertable=False,
         )
         found_any = True
 
@@ -401,6 +412,7 @@ def check_system_cleaner(reporter):
                 "Desktop thumbnail cache can grow large over time.",
                 f"rm -rf {shlex.quote(thumb_dir)}",
                 fix_cmds=[f"rm -rf {shlex.quote(thumb_dir)}"],
+                revertable=False,
             )
             found_any = True
 
@@ -494,6 +506,7 @@ def _cleaner_common_caches(reporter) -> int:
                 f"Package-manager download cache at {d}. Packages re-download on demand.",
                 f"Run: {tool}",
                 fix_cmds=[tool],
+                revertable=False,
             )
             n += 1
     return n
@@ -534,6 +547,7 @@ def _check_system_cleaner_macos(reporter):
             "Files in the Trash still occupy disk space until emptied.",
             "Finder → Empty Trash, or use the fix below.",
             fix_cmds=[f"rm -rf {shlex.quote(trash)}/*"],
+            revertable=False,
         )
         found_any = True
 
@@ -546,6 +560,7 @@ def _check_system_cleaner_macos(reporter):
             "~/Library/Logs accumulates diagnostic logs apps never clean up.",
             "Safe to clear — apps recreate logs as needed.",
             fix_cmds=[f"rm -rf {shlex.quote(logs)}/*"],
+            revertable=False,
         )
         found_any = True
 
@@ -558,6 +573,7 @@ def _check_system_cleaner_macos(reporter):
             "Xcode build intermediates — fully regenerated on the next build.",
             "Safe to clear.",
             fix_cmds=[f"rm -rf {shlex.quote(derived)}/*"],
+            revertable=False,
         )
         found_any = True
 
@@ -588,6 +604,7 @@ def _check_system_cleaner_macos(reporter):
                     "Old formula versions and download cache kept by Homebrew.",
                     "Run: brew cleanup",
                     fix_cmds=["brew cleanup"],
+                    revertable=False,
                 )
                 found_any = True
         except (OSError, subprocess.TimeoutExpired):
@@ -615,6 +632,7 @@ def _check_system_cleaner_macos(reporter):
             "Files > 10 MB in temp directories not touched in 7+ days.",
             "Remove old temp files.",
             fix_cmds=[f"rm -rf {shlex.quote(p)}" for p, _ in old_tmp[:15]],
+            revertable=False,
         )
         found_any = True
 
