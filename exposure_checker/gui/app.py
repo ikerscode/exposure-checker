@@ -988,9 +988,21 @@ class _SessionTracker:
     def __init__(self):
         self._snaps: list = []  # [(label, snap_dict)]
 
-    def before_fix(self, label: str):
-        snap = ec.take_snapshot(label=f"before: {label}")
+    def before_fix(self, label: str) -> bool:
+        """Capture pre-fix state. Returns True on success, False if snapshot failed.
+        The caller MUST abort the fix if this returns False."""
+        try:
+            snap = ec.take_snapshot(label=f"before: {label}")
+        except Exception:
+            return False
+        # A snapshot with nothing captured is useless — every file read failed
+        # and no firewall data was obtained.
+        has_files = any(v is not None for v in snap.get("files", {}).values())
+        has_net   = bool(snap.get("ufw_status") or snap.get("ufw_rules"))
+        if not has_files and not has_net:
+            return False
         self._snaps.append((label, snap))
+        return True
 
     @property
     def has_changes(self):
@@ -1669,7 +1681,15 @@ class ScanTab:
             return
 
         if self._tracker:
-            self._tracker.before_fix(self._title)
+            if not self._tracker.before_fix(self._title):
+                messagebox.showerror(
+                    "Snapshot failed",
+                    "Could not capture the current system state before applying fixes.\n\n"
+                    "The fix has been aborted to protect your configuration.\n"
+                    "This may happen if the app lacks read access to system files.",
+                    parent=self.frame,
+                )
+                return
             self.app._refresh_revert_btn()
 
         self.app.set_gull_fixing(True)
@@ -2137,7 +2157,15 @@ class OverviewTab:
         ):
             return
 
-        self._app._tracker.before_fix("Overview")
+        if not self._app._tracker.before_fix("Overview"):
+            messagebox.showerror(
+                "Snapshot failed",
+                "Could not capture the current system state before applying fixes.\n\n"
+                "The fix has been aborted to protect your configuration.\n"
+                "This may happen if the app lacks read access to system files.",
+                parent=self.frame,
+            )
+            return
         self._app._refresh_revert_btn()
         self._app.set_gull_fixing(True)
         self._btn_fix.configure(state=tk.DISABLED, text="Fixing…", style="Dim.TButton")
