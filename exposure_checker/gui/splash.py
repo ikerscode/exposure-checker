@@ -115,7 +115,11 @@ def _sky_color(frac):
 # ── Main render routine ─────────────────────────────────────────────────────────
 
 def _run(pygame, gfxdraw, np, have_np, duration, version):
-    pygame.init()
+    # Init only what the splash needs. Full pygame.init() also spins up the audio
+    # mixer, which on Windows can block for a second or more while it enumerates
+    # output devices — pure startup latency for a screen that plays no sound.
+    pygame.display.init()
+    pygame.font.init()
     try:
         pygame.display.set_caption("Gullwing")
     except Exception:
@@ -127,10 +131,11 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
     HZ = int(H * 0.52)           # horizon line (supersampled space)
     HZ_w = HZ // SS              # horizon line at window resolution
 
-    screen = pygame.display.set_mode(
-        (BASE_W, BASE_H),
-        pygame.NOFRAME | pygame.HWSURFACE | pygame.DOUBLEBUF,
-    )
+    # Plain software NOFRAME surface. HWSURFACE/DOUBLEBUF break direct pixel
+    # access via pygame.surfarray (used by the reflection + post-processing),
+    # which produced black artefact boxes and let frames bleed onto other
+    # windows on Windows. A software surface renders cleanly and is fast enough.
+    screen = pygame.display.set_mode((BASE_W, BASE_H), pygame.NOFRAME)
     scene = pygame.Surface((W, H)).convert()
     glow = pygame.Surface((W, H), pygame.SRCALPHA)
 
@@ -215,10 +220,14 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
             "ph": rng.uniform(0, 6.28), "warm": rng.random() < 0.72,
         })
 
-    # ── Fonts ─────────────────────────────────────────────────────────────────
+    # ── Fonts — terminal / "hacker" monospace ─────────────────────────────────
+    # Prefer a monospaced coding face so the splash reads like a terminal. Falls
+    # back across the common cross-platform monospace fonts, then to pygame's
+    # built-in font if none are installed.
     def _font(size, bold=True):
-        for name in ("Helvetica Neue", "Helvetica", "Arial",
-                     "DejaVu Sans", "Liberation Sans"):
+        for name in ("JetBrains Mono", "Cascadia Code", "Cascadia Mono",
+                     "Consolas", "SF Mono", "Menlo", "DejaVu Sans Mono",
+                     "Liberation Mono", "Courier New", "monospace"):
             try:
                 if pygame.font.match_font(name, bold=bold):
                     return pygame.font.SysFont(name, size, bold=bold)
@@ -228,9 +237,9 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
 
     # Titles render on the window surface (not the supersampled scene), so they
     # must be window-scale, NOT multiplied by SS.
-    f_title = _font(32, bold=True)
+    f_title = _font(30, bold=True)
     f_sub = _font(13, bold=False)
-    f_small = _font(10, bold=False)
+    f_small = _font(11, bold=False)
 
     stages = [
         (0.00, "Detecting platform and loading base configuration…"),
@@ -333,14 +342,17 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
     start = pygame.time.get_ticks()
     fade_in, fade_out = 0.5, 0.7
 
-    # Pre-generate film grain pool — avoids np.random.rand every frame (45×/s)
+    # Pre-generate a small film-grain pool — avoids np.random.rand every frame
+    # (45×/s). 12 frames is plenty: grain is subtle noise, so a short cycle is
+    # imperceptible, and a small pool keeps startup latency near zero.
+    _GRAIN_N    = 12
     _grain_pool = None
     _grain_idx  = 0
     if have_np:
         try:
             _grain_pool = [
                 (np.random.rand(BASE_W, BASE_H, 1).astype(np.float32) - 0.5) * 0.016
-                for _ in range(60)
+                for _ in range(_GRAIN_N)
             ]
         except Exception:
             _grain_pool = None
@@ -581,7 +593,7 @@ def _run(pygame, gfxdraw, np, have_np, duration, version):
         # ── Per-pixel post: filmic tone-map, grade, vignette, CA, grain ───────
         if have_np:
             try:
-                grain = _grain_pool[_grain_idx % 60] if _grain_pool else None
+                grain = _grain_pool[_grain_idx % _GRAIN_N] if _grain_pool else None
                 _grain_idx += 1
                 _post_np(np, pygame, screen, BASE_W, BASE_H,
                          vignette, edge_mask, _aces, grain)

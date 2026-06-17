@@ -1804,6 +1804,11 @@ class ScanTab:
         self._btn_scan.configure(state=tk.NORMAL)
 
         score, grade = self._update_score_panel()
+        # Guarantee the radar sweep stops even when a scan errored or produced no
+        # report data — otherwise _update_score_panel never calls show_score and
+        # the radar spins forever on that tab.
+        if not self._reporter_data:
+            self._stage.reset()
         n = len(self._findings)
         counts: dict = {}
         for f in self._findings:
@@ -1888,12 +1893,16 @@ class ScanTab:
         self._btn_scan.configure(state=tk.NORMAL)
         self._pane.set_fix_btn_state(True)
         self._refresh_btns()
+        # Always rescan after a fix attempt so the UI reflects the new state —
+        # even if some commands failed, others may have succeeded.
         if success:
             self.app._set_status("Fixes applied — rescanning all tabs in 2s…")
             self.app._log_append("\nFixes applied. Rescanning all tabs…\n", "ok")
-            self.frame.after(2000, self.app._rescan_populated_tabs)
         else:
-            self.app._set_status("Some fixes failed — check Scan activity.")
+            self.app._set_status("Some fixes failed — rescanning all tabs in 2s…")
+            self.app._log_append(
+                "\nSome fixes failed. Rescanning all tabs to refresh state…\n", "err")
+        self.frame.after(2000, self.app._rescan_populated_tabs)
 
     # ── Report helpers ─────────────────────────────────────────────────────────
 
@@ -3348,6 +3357,10 @@ class App:
         self._tab_overclock = OverclockTab(self._nb, self)
         self._tab_snapshots = SnapshotsTab(self._nb, self)
 
+        # Start on the Security tab — the Overview is a place users navigate to,
+        # not the default landing tab.
+        self._nb.select(self._tab_security.frame)
+
         # ── Scan activity log ──────────────────────────────────────────────────
         log_hdr = tk.Frame(r, bg=C["bg"])
         log_hdr.pack(fill=tk.X, padx=16, pady=(6, 2))
@@ -3743,6 +3756,8 @@ class App:
                     self._tab_performance, self._tab_protection,
                     self._tab_cleaner):
             if getattr(tab, "_findings", []):
+                # Clear any stuck scanning flag so start_scan can't early-return.
+                tab._scanning = False
                 tab._post_fix_scan = True
                 tab.start_scan()
 

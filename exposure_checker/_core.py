@@ -23,11 +23,26 @@ except ImportError:
     _CRYPTO_OK = False
 
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 _OS = platform.system()  # "Linux" | "Darwin" | "Windows"
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if _OS == "Windows" else 0
+
+if _OS == "Windows" and _NO_WINDOW:
+    # ── Kill the flashing console window, everywhere ───────────────────────────
+    # On Windows *every* child process briefly pops a console window unless
+    # CREATE_NO_WINDOW is set. The app polls hardware and runs many probes on a
+    # timer, so without this a CMD window flickers constantly. Rather than thread
+    # the flag through dozens of call sites (ours and third-party libraries),
+    # patch Popen once at import time so all child processes inherit it.
+    _orig_popen_init = subprocess.Popen.__init__
+
+    def _popen_no_window(self, *args, **kwargs):
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | _NO_WINDOW
+        _orig_popen_init(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = _popen_no_window
 
 
 # ── PowerShell / shell helpers ─────────────────────────────────────────────────
