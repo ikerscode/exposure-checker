@@ -983,10 +983,17 @@ def _show_fix_denied_dialog(root, findings):
 # ── Session tracker ────────────────────────────────────────────────────────────
 
 class _SessionTracker:
-    """Captures pre-fix snapshots so everything applied this session can be reverted."""
+    """Captures pre-fix snapshots so everything applied this session can be reverted.
+
+    On first successful before_fix() call the snapshot is also written to
+    ~/.local/share/gullwing/sessions/<ts>/ so that an incomplete session
+    (app killed mid-fix) is detectable on next launch.  mark_complete() is
+    called when the user finishes a revert, adding a 'completed' sentinel.
+    """
 
     def __init__(self):
-        self._snaps: list = []  # [(label, snap_dict)]
+        self._snaps:      list = []   # [(label, snap_dict)]
+        self._session_ts: str  = ""   # set on first successful before_fix
 
     def before_fix(self, label: str) -> bool:
         """Capture pre-fix state. Returns True on success, False if snapshot failed.
@@ -1002,6 +1009,12 @@ class _SessionTracker:
         if not has_files and not has_net:
             return False
         self._snaps.append((label, snap))
+        # Persist to disk on the first snap in this session so an abrupt kill
+        # leaves a recoverable manifest.
+        if not self._session_ts:
+            import datetime as _dt
+            self._session_ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        ec.write_session_manifest(self._session_ts, label, snap)
         return True
 
     @property
@@ -1019,6 +1032,10 @@ class _SessionTracker:
         return lines
 
     def clear(self):
+        """Clear in-memory state and mark the on-disk session as completed."""
+        if self._session_ts:
+            ec.mark_session_complete(self._session_ts)
+            self._session_ts = ""
         self._snaps.clear()
 
 
@@ -3197,6 +3214,9 @@ class App:
         self._build()
         self._refresh_last_scan_badge()
         self._poll()
+        # Check for sessions that were interrupted before the app last exited.
+        # Defer so the window is fully rendered before the dialog appears.
+        root.after(800, self._check_incomplete_sessions)
 
     # ── Build ─────────────────────────────────────────────────────────────────
 
@@ -3842,6 +3862,38 @@ class App:
             f"Session reverted — {ok_n} ok, {fail_n} failed. Rescanning in 3s…"
         )
         self.root.after(3000, self._tab_security.start_scan)
+
+    def _check_incomplete_sessions(self):
+        """On launch, surface any sessions that were interrupted mid-fix."""
+        sessions = ec.find_incomplete_sessions()
+        if not sessions:
+            return
+        # Use the earliest incomplete session for the revert candidate.
+        session_ts, manifest = sessions[0]
+        snap  = manifest.get("snap", {})
+        label = manifest.get("label", session_ts)
+        ts_human = session_ts[:8] + " " + session_ts[9:11] + ":" + session_ts[11:13]
+        if not messagebox.askyesno(
+            "Incomplete session detected",
+            f"Gullwing was closed while fixes were still in progress.\n\n"
+            f"Session:  {ts_human}\n"
+            f"Last fix: {label}\n\n"
+            "Would you like to revert the changes from that session now?\n\n"
+            "Choose No to leave the changes in place (they will not be offered again).",
+            parent=self.root,
+        ):
+            # User declined — mark it complete so it won't reappear.
+            ec.mark_session_complete(session_ts)
+            return
+        self._set_status("Reverting interrupted session…")
+        self._progress.start(10)
+
+        def _worker():
+            results = ec.restore_snapshot(snap)
+            ec.mark_session_complete(session_ts)
+            self.root.after(0, lambda: self._finish_revert(results))
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _refresh_last_scan_badge(self) -> None:
         """Update the status-bar 'Last scan' pill from on-disk history."""

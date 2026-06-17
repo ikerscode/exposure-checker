@@ -16,9 +16,12 @@ _EC_DATA_DIR = os.path.join(
     os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"),
     "gullwing",
 )
-_HISTORY_DIR = os.path.join(_EC_DATA_DIR, "history")
+_HISTORY_DIR  = os.path.join(_EC_DATA_DIR, "history")
 _SNAPSHOT_DIR = os.path.join(_EC_DATA_DIR, "snapshots")
+_SESSION_DIR  = os.path.join(_EC_DATA_DIR, "sessions")
 _ACCEPTED_FILE = os.path.join(_EC_DATA_DIR, "accepted_risks.json")
+
+_SESSION_TTL_DAYS = 7
 
 _SNAPSHOT_CAPTURED_FILES = [
     "/etc/ssh/sshd_config",
@@ -301,6 +304,80 @@ def restore_snapshot(snap):
             rc, out = _run_fix_cmd("ufw disable")
             results.append(("ufw disable", rc == 0, out.strip()[:120]))
 
+    return results
+
+
+# ── Session manifest (disk-persistent revert state) ───────────────────────────
+
+def write_session_manifest(session_ts: str, label: str, snap: dict) -> bool:
+    """Persist a pre-fix snapshot to disk under sessions/<session_ts>/.
+
+    Written atomically (tmp file → rename) so a kill mid-write never leaves a
+    corrupt manifest.  Returns True on success.
+    """
+    import tempfile as _tempfile
+    d = os.path.join(_SESSION_DIR, session_ts)
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        return False
+    manifest = {"session_ts": session_ts, "label": label, "snap": snap}
+    dest = os.path.join(d, "manifest.json")
+    tmp  = dest + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh, indent=2, default=str)
+        os.replace(tmp, dest)   # atomic on POSIX; best-effort on Windows
+        return True
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return False
+
+
+def mark_session_complete(session_ts: str) -> None:
+    """Write a 'completed' sentinel so the session is not surfaced on next launch."""
+    d = os.path.join(_SESSION_DIR, session_ts)
+    try:
+        with open(os.path.join(d, "completed"), "w") as fh:
+            fh.write("")
+    except OSError:
+        pass
+
+
+def find_incomplete_sessions() -> list:
+    """Return [(session_ts, manifest_dict)] for sessions that:
+      - have a manifest.json but no 'completed' marker
+      - are less than _SESSION_TTL_DAYS old
+
+    Older or corrupt dirs are silently skipped (not deleted — safety first).
+    """
+    if not os.path.isdir(_SESSION_DIR):
+        return []
+    cutoff = time.time() - _SESSION_TTL_DAYS * 86400
+    results = []
+    try:
+        entries = sorted(os.scandir(_SESSION_DIR), key=lambda e: e.name)
+    except OSError:
+        return []
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        if os.path.exists(os.path.join(entry.path, "completed")):
+            continue
+        manifest_path = os.path.join(entry.path, "manifest.json")
+        if not os.path.exists(manifest_path):
+            continue
+        try:
+            if os.path.getmtime(manifest_path) < cutoff:
+                continue
+            with open(manifest_path, encoding="utf-8") as fh:
+                manifest = json.load(fh)
+            results.append((entry.name, manifest))
+        except (OSError, json.JSONDecodeError):
+            pass
     return results
 
 

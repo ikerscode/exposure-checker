@@ -150,6 +150,9 @@ from ._storage import (
     list_snapshots,
     delete_snapshot,
     restore_snapshot,
+    write_session_manifest,
+    mark_session_complete,
+    find_incomplete_sessions,
 )
 
 # ── Headless scan / remote scan ────────────────────────────────────────────────
