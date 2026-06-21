@@ -1035,7 +1035,7 @@ def check_world_writable(reporter):
             f"World-writable: {f}",
             "Any local user can modify this file; if executed with elevated privileges "
             "this is a privilege-escalation path.",
-            f"Run: chmod o-w '{f}'",
+            f"Run: chmod o-w {shlex.quote(f)}",
             fix_cmds=[f"chmod o-w {shlex.quote(f)}"],
             path=f,
         )
@@ -1104,7 +1104,7 @@ def check_suid(reporter):
             severity,
             f"{label}: {path}",
             why,
-            f"Remove the setuid/setgid bit if unneeded: chmod u-s '{path}'",
+            f"Remove the setuid/setgid bit if unneeded: chmod u-s {shlex.quote(path)}",
             fix_cmds=fix_cmds,
             path=path,
             suid_type=label,
@@ -1147,14 +1147,12 @@ def _check_scheduled_tasks_windows(reporter):
     for t in suspicious[:10]:
         tname = t.get("TaskName", "?")
         tpath = t.get("TaskPath", "\\")
-        safe_name = tname.replace("'", "''")
-        safe_path = tpath.replace("'", "''")
         reporter.finding(
             "REVIEW",
             f"Third-party task runs as SYSTEM: {tname}",
             f"Non-Microsoft task at {tpath} runs with full machine access.",
             "Review in Task Scheduler — disable if not needed.",
-            fix_cmds=[f"Disable-ScheduledTask -TaskName '{safe_name}' -TaskPath '{safe_path}'"],
+            fix_cmds=[f"Disable-ScheduledTask -TaskName {_ps_quote(tname)} -TaskPath {_ps_quote(tpath)}"],
         )
     reporter.end(f"{len(suspicious)} non-Microsoft SYSTEM task(s) found.")
 
@@ -1231,7 +1229,7 @@ def check_cron(reporter):
             f"World-writable cron script: {script}",
             f"Any local user can overwrite {script}, "
             f"which is referenced in {cron_file} and may run as root.",
-            f"Run: chmod o-w '{script}'",
+            f"Run: chmod o-w {shlex.quote(script)}",
             fix_cmds=[f"chmod o-w {shlex.quote(script)}"],
             cron_file=cron_file,
             script=script,
@@ -1616,8 +1614,8 @@ def _check_sensitive_perms_windows(reporter):
             reporter.finding(
                 "HIGH", f"Sensitive hive readable by Everyone: {path}",
                 "SAM/SYSTEM hive readable by Everyone exposes password hashes.",
-                f'Remove Everyone ACL: icacls "{path}" /remove Everyone',
-                fix_cmds=[f'icacls "{path}" /remove Everyone'],
+                f"Remove Everyone ACL: icacls {_ps_quote(path)} /remove Everyone",
+                fix_cmds=[f"icacls {_ps_quote(path)} /remove Everyone"],
             )
             found_any = True
 
@@ -1637,7 +1635,7 @@ def _check_sensitive_perms_windows(reporter):
                 f"'{path}' contains password or AutoLogon elements in cleartext — "
                 "any local user can read these credentials.",
                 "Delete the file after confirming the machine is fully provisioned.",
-                fix_cmds=[f"Remove-Item -Path '{path}' -Force"],
+                fix_cmds=[f"Remove-Item -Path {_ps_quote(path)} -Force"],
             )
             found_any = True
 
@@ -2204,7 +2202,7 @@ def _check_windows_registry_persistence(reporter):
                         f"Suspicious autorun in {short_key}: {name}",
                         f"Registry key '{key}\\{name}' launches from a suspicious path: {val}",
                         f"Investigate and remove if unexpected: "
-                        f"Remove-ItemProperty -Path '{key}' -Name '{name}'",
+                        f"Remove-ItemProperty -Path {_ps_quote(key)} -Name {_ps_quote(name)}",
                     )
         except Exception:
             pass
@@ -2243,8 +2241,8 @@ def _check_windows_temp_executables(reporter):
             "HIGH",
             f"Executable in temp directory: {os.path.basename(path)}",
             f"'{path}' is an executable in a temp directory — a common malware staging location.",
-            f"Investigate: Get-Item '{path}'; remove if unexpected.",
-            fix_cmds=[f"Remove-Item -Path '{path}' -Force -ErrorAction SilentlyContinue"],
+            f"Investigate: Get-Item {_ps_quote(path)}; remove if unexpected.",
+            fix_cmds=[f"Remove-Item -Path {_ps_quote(path)} -Force -ErrorAction SilentlyContinue"],
         )
     return len(found)
 
@@ -2812,8 +2810,8 @@ def _check_launchd_persistence_macos(reporter) -> int:
                     "HIGH", f"Suspicious launchd persistence: {name}",
                     f"{path} auto-runs at login/boot and references '{snippet}' — "
                     "temp-directory binaries and inline shells are classic Mac malware persistence.",
-                    f"Inspect it: plutil -p '{path}' — if unrecognized, remove and run: "
-                    f"launchctl bootout gui/$(id -u) '{path}'",
+                    f"Inspect it: plutil -p {_shell_quote(path)} — if unrecognized, remove and run: "
+                    f"launchctl bootout gui/$(id -u) {_shell_quote(path)}",
                 )
                 n += 1
     return n

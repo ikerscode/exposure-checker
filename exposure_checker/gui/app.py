@@ -832,10 +832,13 @@ def _batch_fix_windows(cmds):
     no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     fd, script_path = tempfile.mkstemp(suffix=".ps1", prefix="ec-fix-")
     out_path = script_path + ".out"
-    ps_out = out_path.replace("'", "''")     # PS single-quote escape
-    ps_scr = script_path.replace("'", "''")  # PS single-quote escape
+    # Both paths come from tempfile.mkstemp() so they can't contain quotes, but
+    # quote anyway so the escaping invariant has no exceptions. ps_out fills a
+    # simple '{}' slot (ec._ps_quote wraps + escapes); ps_scr is embedded inside
+    # a nested \"...\" Start-Process argument below, so it keeps an inline escape.
+    ps_scr = script_path.replace("'", "''")  # PS single-quote escape (nested)
 
-    lines = [f"$__f = '{ps_out}'"]
+    lines = [f"$__f = {ec._ps_quote(out_path)}"]
     for i, cmd in enumerate(cmds):
         lines += [
             f'"##ECCMD{i}##" | Out-File -Append -Encoding ASCII -FilePath $__f',

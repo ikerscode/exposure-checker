@@ -83,13 +83,14 @@ def _check_system_cleaner_windows(reporter):
     if user_temp and os.path.isdir(user_temp):
         mb = _dir_size_mb(user_temp)
         if mb >= 100:
+            wipe = _ps_quote(user_temp + "\\*")
             reporter.finding(
                 "REVIEW",
                 f"User temp folder: {mb} MB reclaimable",
                 f"{user_temp} holds {mb} MB of temporary files.",
-                f"Run Disk Cleanup or: Remove-Item -Path '{user_temp}\\*' -Recurse -Force",
+                f"Run Disk Cleanup or: Remove-Item -Path {wipe} -Recurse -Force",
                 fix_cmds=[
-                    f"Remove-Item -Path '{user_temp}\\*' -Recurse -Force "
+                    f"Remove-Item -Path {wipe} -Recurse -Force "
                     "-ErrorAction SilentlyContinue"
                 ],
                 revertable=False,
@@ -119,6 +120,7 @@ def _check_system_cleaner_windows(reporter):
     if os.path.isdir(wu_cache):
         mb = _dir_size_mb(wu_cache)
         if mb >= 200:
+            wipe = _ps_quote(wu_cache + "\\*")
             reporter.finding(
                 "REVIEW",
                 f"Windows Update cache: {mb} MB reclaimable",
@@ -126,7 +128,7 @@ def _check_system_cleaner_windows(reporter):
                 "Stop Windows Update, clear the cache, then restart the service.",
                 fix_cmds=[
                     "net stop wuauserv",
-                    f"Remove-Item -Path '{wu_cache}\\*' -Recurse -Force "
+                    f"Remove-Item -Path {wipe} -Recurse -Force "
                     "-ErrorAction SilentlyContinue",
                     "net start wuauserv",
                 ],
@@ -148,13 +150,14 @@ def _check_system_cleaner_windows(reporter):
             dumps = []
         if dumps:
             mb = _dir_size_mb(d)
+            wipe = _ps_quote(d + "\\*.dmp")
             reporter.finding(
                 "REVIEW",
                 f"{len(dumps)} crash dump(s) in {os.path.basename(d)} ({mb} MB)",
                 "Crash/minidump files accumulate after application or system crashes.",
-                f"Run: Remove-Item -Path '{d}\\*.dmp' -Force",
+                f"Run: Remove-Item -Path {wipe} -Force",
                 fix_cmds=[
-                    f"Remove-Item -Path '{d}\\*.dmp' -Force -ErrorAction SilentlyContinue"
+                    f"Remove-Item -Path {wipe} -Force -ErrorAction SilentlyContinue"
                 ],
                 revertable=False,
             )
