@@ -1,4 +1,4 @@
-# Gullwing v1.0.8
+# Gullwing v1.1.1
 
 **Tune it. Lock it. Send it.** — a fully local, offline desktop companion for Windows, macOS, and Linux.  
 No cloud. No APIs. No telemetry. No account. Everything runs on your machine.
@@ -11,7 +11,7 @@ Most "PC optimizers" do one thing, phone home, and ask you to trust a black box.
 
 - **🛡️ All-in-one.** Security audit, malware heuristics, performance tuning, disk cleaner, benchmark, and an overclock advisory — one app, six jobs, three operating systems.
 - **🔒 100% local & private.** Nothing ever leaves your machine. No telemetry, no analytics, no API keys, no account. Every fix is a plain shell / PowerShell / registry command, shown to you before it runs.
-- **↩️ Fully reversible.** Gullwing snapshots your config before it changes anything. One **Revert Session** button rolls back every fix applied — so you can experiment without fear.
+- **↩️ Reversible by default.** Before changing a config file, Gullwing snapshots it to disk so one **Revert Session** button can roll the change back — and that snapshot survives even an abrupt crash. Actions that genuinely can't be undone (cleaner deletions, Windows registry/service tweaks) are labelled honestly so you always know what's reversible.
 - **👁️ Transparent.** Every finding has a severity, a plain-English explanation, and the exact command behind its **Fix** button. *Copy Commands* lets you run them yourself.
 - **✨ Beautiful.** A cinematic, hardware-accelerated loading screen and an Opera-GX-style live hardware monitor — a tool you actually want to open.
 
@@ -71,6 +71,8 @@ Gullwing scans your machine for security vulnerabilities and performance bottlen
 | MEDIUM | Should be addressed |
 | REVIEW | Investigate and decide |
 | INFO | Informational — no auto-fix |
+
+> **Your score reflects what you can actually fix.** Findings with no one-click fix available (e.g. "enable Secure Boot in BIOS", informational notes) never count against your overall score — so applying the fixes Gullwing offers is always enough to reach a top grade.
 
 ---
 
@@ -347,20 +349,21 @@ Every fix Gullwing applies is a local shell command, PowerShell command, or regi
 
 The Fix button shows you the exact command it will run, and you are always in control:
 
-- **Snapshot & Revert.** Before applying fixes, Gullwing snapshots the affected config (SSH, firewall rules, sysctl, hosts). **Revert Session** rolls back everything you changed this session.
+- **Snapshot & Revert.** Before applying fixes, Gullwing snapshots the affected config (SSH, firewall rules, sysctl, hosts) **to disk** — so if the app is closed or crashes mid-fix, it offers to finish the rollback on next launch. **Revert Session** rolls back everything you changed this session. Cleaner deletions are marked **"Cannot be undone"** rather than pretending they're reversible, and on Windows the snapshot covers the hosts file (registry/service tweaks aren't tracked, so those fixes are applied as non-revertable).
 - **Accept Risk.** Dismiss a finding you've reviewed and don't want to fix — it won't nag you on the next scan.
 - **Copy Commands.** Prefer to run things yourself? Copy the exact commands and paste them into your own terminal.
 - **Disk-space pre-flight.** Fixes that write to disk warn you first if space is critically low.
 
 ---
 
-## What's New in v1.0.8
+## What's New in v1.1.1
 
-- **🎬 Cinematic loading screen.** A hardware-accelerated (pygame + numpy) Venice-canal sunset: one-point-perspective palazzos, real rippled water reflections, volumetric god-rays, lens flare, sunset-lit clouds, film-grain & filmic tone-mapping — with a flock of seagulls gliding down the canal. Falls back to the built-in animated splash when the optional libraries aren't installed.
-- **⚡ Faster, never-hanging scans.** Antivirus and Cleaner scans are now fully time-budgeted: ClamAV is capped and size-limited, the script scanner and `auth.log` reader tail/stop cleanly on huge inputs, and directory sizing is bounded — no more endless "scanning…" on big systems.
-- **🎛️ Opera-GX-style live monitor.** The Overclock tab's hardware meters animate at 30 fps with glow bars and only re-render the advisory when findings actually change (no more full-panel flicker).
-- **🪶 More prominent gulls** with dark wingtips, soft water shadows, motion-blur, and reflections in the canal.
-- **🛠️ Stability fixes** across malware, cleaner, and storage modules (including a latent missing-import crash on systems with ClamAV installed).
+- **🪶 New gold design system.** A refreshed shell built on a single source-of-truth theme: warm gold accent, teal data highlights, refined surface/border hierarchy, and bundled OFL fonts (Space Grotesk, IBM Plex Sans, JetBrains Mono). The header is now a clean frame carrying the Gullwing gull mark, with a left navigation rail replacing the old tab strip.
+- **✨ Real app icon.** A generated Gullwing mark ships as a full icon bundle — `.ico` for Windows, `.icns` for macOS, multi-resolution PNGs, and an in-app header mark — so the app looks the part in the taskbar, dock, and Start menu.
+- **🎯 Honest scoring.** Findings that have no one-click fix (BIOS-only settings, informational notes) no longer drag down your overall score. Apply what Gullwing can fix and a top grade is always within reach.
+- **💾 Crash-safe revert.** Pre-fix snapshots are written to disk atomically. If Gullwing is closed or killed mid-fix, it detects the interrupted session on next launch and offers to complete the rollback.
+- **🧹 Truthful reversibility.** Cleaner deletions are now flagged **"Cannot be undone"** instead of implying they can be reverted, and the fix flow refuses to proceed if it genuinely couldn't capture the state it would need to roll back.
+- **🪟 Windows fix reliability.** Fixes no longer fail with "could not capture the current system state" on Windows and macOS — the snapshot layer is platform-aware and only blocks a fix when a rollback would truly be impossible.
 
 ---
 
@@ -374,4 +377,4 @@ The Fix button shows you the exact command it will run, and you are always in co
 
 ---
 
-*Gullwing v1.0.8 — built for people who want their machine to perform.*
+*Gullwing v1.1.1 — built for people who want their machine to perform.*
