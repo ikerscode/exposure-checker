@@ -1,4 +1,4 @@
-# Runs exposure-checker on the machine you own.
+# Runs Gullwing on the machine you own.
 #
 # REQUIREMENTS
 #   • A self-hosted runner registered on that machine (the tool scans localhost,
@@ -14,7 +14,7 @@
 #   3. Push this file; the first run will save the initial baseline.
 #
 # BASELINE PERSISTENCE
-#   The baseline lives at ~/.local/share/exposure-checker/baseline.json on the
+#   The baseline lives at ~/.local/share/gullwing/baseline.json on the
 #   runner machine.  Because it is a persistent host the file survives between
 #   runs automatically — no artifact upload/download loop needed.
 
@@ -43,7 +43,7 @@ jobs:
           python-version: '3.11'
           cache: pip
 
-      - name: Install exposure-checker
+      - name: Install Gullwing
         run: pip install --quiet -e .
 
       - name: Run security scan
@@ -52,7 +52,7 @@ jobs:
         # --fail-on high   exits 1 if any NEW HIGH or CRITICAL finding appeared.
         # --output         saves the full report for the artifact step.
         run: |
-          exposure-checker \
+          gullwing \
             --full-audit \
             --output report.json \
             --diff-baseline \

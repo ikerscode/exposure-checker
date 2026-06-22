@@ -70,6 +70,13 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data)
 
+# macOS code-signing is opt-in: set these env vars in the signing CI job (see
+# docs/RELEASE-SIGNING.md). When unset the build is unsigned exactly as before,
+# so local/dev builds are unaffected. Windows signing is done as a post-build
+# step on the .exe (signtool / Azure Trusted Signing) — not via this spec.
+_CODESIGN_IDENTITY = os.environ.get('GULLWING_CODESIGN_IDENTITY') or None
+_ENTITLEMENTS = os.environ.get('GULLWING_ENTITLEMENTS') or None
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -88,8 +95,8 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
+    codesign_identity=_CODESIGN_IDENTITY,
+    entitlements_file=_ENTITLEMENTS,
     icon=_ICO_PATH if os.path.isfile(_ICO_PATH) else None,
 )
 

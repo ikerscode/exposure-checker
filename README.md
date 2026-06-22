@@ -1,4 +1,4 @@
-# Gullwing v1.1.2
+# Gullwing v1.1.3
 
 **Tune it. Lock it. Send it.** — a fully local, offline desktop companion for Windows, macOS, and Linux.  
 No cloud. No APIs. No telemetry. No account. Everything runs on your machine.
@@ -20,6 +20,8 @@ Most "PC optimizers" do one thing, phone home, and ask you to trust a black box.
 ---
 
 ## Quick Start
+
+> **New here?** [GETTING-STARTED.md](GETTING-STARTED.md) is a two-minute first-run guide — scanning, what the score means, how Fix prompts you, and exactly what Revert can and can't undo.
 
 > **Optional — cinematic splash:** Gullwing ships a hardware-accelerated Venice-sunset loading screen. To enable it, install the extra:
 > ```bash
@@ -349,10 +351,22 @@ Every fix Gullwing applies is a local shell command, PowerShell command, or regi
 
 The Fix button shows you the exact command it will run, and you are always in control:
 
+> **What's reversible, honestly:** most security and config changes can be reverted in one click; file deletions (Cleaner) and some Windows changes (registry/services) cannot. See [GETTING-STARTED.md](GETTING-STARTED.md#4-revert--what-it-does-and-doesnt-cover) for the full picture.
+
 - **Snapshot & Revert.** Before applying fixes, Gullwing snapshots the affected config (SSH, firewall rules, sysctl, hosts) **to disk** — so if the app is closed or crashes mid-fix, it offers to finish the rollback on next launch. **Revert Session** rolls back everything you changed this session. Cleaner deletions are marked **"Cannot be undone"** rather than pretending they're reversible, and on Windows the snapshot covers the hosts file (registry/service tweaks aren't tracked, so those fixes are applied as non-revertable).
+- **Re-validated remediation.** Applying fixes from a saved report (`gullwing remediate`) re-checks every command against a fresh scan first — a tampered report can't smuggle in commands the live system doesn't actually call for.
 - **Accept Risk.** Dismiss a finding you've reviewed and don't want to fix — it won't nag you on the next scan.
 - **Copy Commands.** Prefer to run things yourself? Copy the exact commands and paste them into your own terminal.
 - **Disk-space pre-flight.** Fixes that write to disk warn you first if space is critically low.
+
+---
+
+## What's New in v1.1.3
+
+- **🧾 Now properly open-source.** Added an explicit MIT `LICENSE` so the code you can read is also code you can legally fork, redistribute, and build on.
+- **🛡️ Tamper-proof remediation.** `gullwing remediate` now re-validates every command in a saved report against a fresh live scan before running it — a hand-edited report can't smuggle in commands the system doesn't actually call for, even under `--all --yes`.
+- **🪟 Clearer Windows revert scope.** After applying fixes, Gullwing states plainly that Windows registry/service changes aren't covered by Revert Session (use System Restore), so the Revert button never over-promises.
+- **📖 First-run guide.** A new [GETTING-STARTED.md](GETTING-STARTED.md) explains scanning, scoring, how Fix prompts you, and exactly what Revert can and can't undo. Signing/auto-update path documented in [docs/RELEASE-SIGNING.md](docs/RELEASE-SIGNING.md).
 
 ---
 
@@ -385,4 +399,4 @@ The Fix button shows you the exact command it will run, and you are always in co
 
 ---
 
-*Gullwing v1.1.2 — built for people who want their machine to perform.*
+*Gullwing v1.1.3 — built for people who want their machine to perform.*

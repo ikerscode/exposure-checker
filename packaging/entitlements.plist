@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the notarized macOS build.
+  Point GULLWING_ENTITLEMENTS at this file in the signing CI job
+  (see docs/RELEASE-SIGNING.md).
+
+  PyInstaller bootloaders need the JIT / unsigned-executable-memory and
+  dyld-environment-variables exceptions, or the app crashes on launch under
+  the hardened runtime. Keep this list as small as it can be while still
+  launching cleanly.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>
