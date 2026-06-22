@@ -1944,6 +1944,7 @@ class ScanTab:
             self.app._set_status("Some fixes failed — rescanning all tabs in 2s…")
             self.app._log_append(
                 "\nSome fixes failed. Rescanning all tabs to refresh state…\n", "err")
+        self.app._note_windows_revert_scope()
         self.frame.after(2000, self.app._rescan_populated_tabs)
 
     # ── Report helpers ─────────────────────────────────────────────────────────
@@ -2233,6 +2234,7 @@ class OverviewTab:
             self.frame.after(2000, self._rescan_tabs_with_data)
         else:
             self._app._set_status("Some fixes failed — check Scan activity.")
+        self._app._note_windows_revert_scope()
         self.refresh()
 
     def _rescan_tabs_with_data(self):
@@ -3560,6 +3562,21 @@ class App:
 
     def set_gull_fixing(self, fixing: bool):
         self._gull_fixing = fixing
+
+    def _note_windows_revert_scope(self):
+        """After fixes apply on Windows, state plainly what Revert can't undo.
+
+        The snapshot layer only captures the hosts file on Windows; the bulk of
+        Windows fixes are registry/service changes it can't roll back. Say so
+        once per session rather than letting the Revert button imply otherwise.
+        """
+        if _UI_OS != "Windows" or getattr(self, "_win_revert_noted", False):
+            return
+        self._win_revert_noted = True
+        self._log_append(
+            "\nNote: Windows registry and service changes can't be undone by "
+            "Revert Session — only firewall/hosts edits are snapshotted. "
+            "Use System Restore for a full rollback.\n", "muted")
 
     # ── Quips & easter eggs ───────────────────────────────────────────────────
 
