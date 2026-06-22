@@ -1,4 +1,4 @@
-# Gullwing v1.1.1
+# Gullwing v1.1.2
 
 **Tune it. Lock it. Send it.** — a fully local, offline desktop companion for Windows, macOS, and Linux.  
 No cloud. No APIs. No telemetry. No account. Everything runs on your machine.
@@ -356,6 +356,14 @@ The Fix button shows you the exact command it will run, and you are always in co
 
 ---
 
+## What's New in v1.1.2
+
+- **🔒 Security: closed an admin-level command-injection bug.** A maliciously *named* file in a Windows temp directory (the exact thing the malware scanner flags) could break out of the elevated fix command and run as Administrator when the user clicked **Fix**. Every fix command now routes filesystem-, process-, and registry-derived values through strict PowerShell/POSIX quoting, and a dedicated test suite plants adversarial filenames to keep it that way.
+- **🪟 Correct per-OS data locations.** Snapshots, scan history, and revert manifests now live where each OS expects them — `%APPDATA%\gullwing` on Windows, `~/Library/Application Support/gullwing` on macOS, XDG paths on Linux — instead of a Linux-style hidden folder everywhere.
+- **💽 Cross-platform disk-space pre-flight.** The low-space warning now checks the drive you actually live on rather than a hardcoded `/`, so it works on Windows too.
+
+---
+
 ## What's New in v1.1.1
 
 - **🪶 New gold design system.** A refreshed shell built on a single source-of-truth theme: warm gold accent, teal data highlights, refined surface/border hierarchy, and bundled OFL fonts (Space Grotesk, IBM Plex Sans, JetBrains Mono). The header is now a clean frame carrying the Gullwing gull mark, with a left navigation rail replacing the old tab strip.
@@ -377,4 +385,4 @@ The Fix button shows you the exact command it will run, and you are always in co
 
 ---
 
-*Gullwing v1.1.1 — built for people who want their machine to perform.*
+*Gullwing v1.1.2 — built for people who want their machine to perform.*

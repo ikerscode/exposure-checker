@@ -12,10 +12,22 @@ import time
 from ._core import _OS, _ps, _DEFAULT_BASELINE, _SMTP_CONFIG_PATH, _SCHEDULE_FILE, _Reporter
 from ._remediate import _run_fix_cmd
 
-_EC_DATA_DIR = os.path.join(
-    os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"),
-    "gullwing",
-)
+def _data_dir() -> str:
+    """Per-OS application data directory for snapshots, history, sessions.
+
+    Recovery state (revert manifests) must live where each OS expects it:
+    Windows %APPDATA%, macOS ~/Library/Application Support, Linux XDG.
+    """
+    if _OS == "Windows":
+        base = os.environ.get("APPDATA") or os.path.expanduser(r"~\AppData\Roaming")
+    elif _OS == "Darwin":
+        base = os.path.expanduser("~/Library/Application Support")
+    else:
+        base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(base, "gullwing")
+
+
+_EC_DATA_DIR = _data_dir()
 _HISTORY_DIR  = os.path.join(_EC_DATA_DIR, "history")
 _SNAPSHOT_DIR = os.path.join(_EC_DATA_DIR, "snapshots")
 _SESSION_DIR  = os.path.join(_EC_DATA_DIR, "sessions")

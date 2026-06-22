@@ -51,8 +51,11 @@ def _run_fix_cmd(cmd):
 
 def _check_disk_space(min_mb: int = 50):
     """Return a warning string if disk space is critically low, else None."""
+    # "/" is meaningless on Windows; check the drive the user actually lives on
+    # (resolves to the system drive on Windows, the home volume on POSIX).
+    target = os.path.expanduser("~") or os.path.abspath(os.sep)
     try:
-        usage = shutil.disk_usage("/")
+        usage = shutil.disk_usage(target)
         free_mb = usage.free / (1024 * 1024)
         if free_mb < min_mb:
             return (f"Only {free_mb:.0f} MB free on disk — fixes that write to disk "
