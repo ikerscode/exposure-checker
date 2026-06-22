@@ -26,50 +26,68 @@ from .checks.portscan import run_port_scan
 from ._report import _compute_score
 from ._storage import save_scan_history
 
+# Tabs that produce findings worth scanning/remediating (benchmark excluded —
+# it has no fixes and is slow).
+SCANNABLE_TABS = ["security", "antivirus", "performance", "protection",
+                  "cleaner", "overclock"]
+
+
+def scan_to_report(tab: str) -> dict:
+    """Run one tab's scanners against the current system; return the report data.
+
+    Shared by the headless scan and by `remediate` re-validation so the set of
+    commands the two trust can never drift apart.
+    """
+    reporter = _Reporter()
+    try:
+        if tab == "security":
+            run_port_scan(reporter, "127.0.0.1", "127.0.0.1", 1.0)
+            audit_ssh(reporter)
+            check_firewall(reporter)
+            check_listeners(reporter)
+            check_world_writable(reporter)
+            check_suid(reporter)
+            check_cron(reporter)
+            check_packages(reporter)
+            check_kernel_hardening(reporter)
+            check_sensitive_perms(reporter)
+            check_user_accounts(reporter)
+            check_docker_socket(reporter)
+        elif tab == "antivirus":
+            check_auth_log(reporter)
+            check_malware(reporter)
+        elif tab == "performance":
+            check_startup(reporter)
+            check_power_settings(reporter)
+            check_gpu_settings(reporter)
+            check_network_perf(reporter)
+            check_memory_perf(reporter)
+            check_system_resources(reporter)
+        elif tab == "protection":
+            check_protection_hardening(reporter)
+        elif tab == "cleaner":
+            check_system_cleaner(reporter)
+        elif tab == "benchmark":
+            check_benchmark(reporter)
+        elif tab == "overclock":
+            check_overclock(reporter)
+    except Exception:
+        pass
+    return reporter._data
+
+
 def run_headless_scan(tabs: list = None, notify: bool = True) -> None:
     """Run scans headlessly, save history, optionally send desktop notification."""
     if tabs is None:
         tabs = ["security"]
     results = []
     for tab in tabs:
-        reporter = _Reporter()
-        try:
-            if tab == "security":
-                run_port_scan(reporter, "127.0.0.1", "127.0.0.1", 1.0)
-                audit_ssh(reporter)
-                check_firewall(reporter)
-                check_listeners(reporter)
-                check_world_writable(reporter)
-                check_suid(reporter)
-                check_cron(reporter)
-                check_packages(reporter)
-                check_kernel_hardening(reporter)
-                check_sensitive_perms(reporter)
-                check_user_accounts(reporter)
-                check_docker_socket(reporter)
-            elif tab == "antivirus":
-                check_auth_log(reporter)
-                check_malware(reporter)
-            elif tab == "performance":
-                check_startup(reporter)
-                check_power_settings(reporter)
-                check_gpu_settings(reporter)
-                check_network_perf(reporter)
-                check_memory_perf(reporter)
-                check_system_resources(reporter)
-            elif tab == "protection":
-                check_protection_hardening(reporter)
-            elif tab == "cleaner":
-                check_system_cleaner(reporter)
-            elif tab == "benchmark":
-                check_benchmark(reporter)
-            elif tab == "overclock":
-                check_overclock(reporter)
-        except Exception:
+        data = scan_to_report(tab)
+        if not data.get("checks"):
             continue
-        score, grade = _compute_score(reporter._data)
+        score, grade = _compute_score(data)
         counts: dict = {}
-        for chk in reporter._data.get("checks", []):
+        for chk in data.get("checks", []):
             for f in chk.get("findings", []):
                 s = f.get("severity", "INFO")
                 counts[s] = counts.get(s, 0) + 1

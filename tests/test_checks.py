@@ -1275,6 +1275,9 @@ class TestRemediateMain:
         path, _ = _report_with_fixable(tmp_path)
         executed = []
         monkeypatch.setattr(ec._remediate, "_run_fix_cmd", lambda cmd: executed.append(cmd) or (0, ""))
+        # The re-validation scan vouches for the report's command.
+        monkeypatch.setattr(ec._remediate, "_live_fix_cmds",
+                            lambda: {"sysctl -w net.ipv4.tcp_syncookies=1"})
         ec._remediate_main([path, "--all", "--yes"])
         assert "sysctl -w net.ipv4.tcp_syncookies=1" in executed
 
@@ -1292,6 +1295,7 @@ class TestRemediateMain:
         p.write_text(json.dumps(data))
         executed = []
         monkeypatch.setattr(ec._remediate, "_run_fix_cmd", lambda cmd: executed.append(cmd) or (0, ""))
+        monkeypatch.setattr(ec._remediate, "_live_fix_cmds", lambda: {"cmd_a", "cmd_b"})
         ec._remediate_main([str(p), "--item", "2", "--yes"])
         assert executed == ["cmd_b"]
         assert "cmd_a" not in executed
@@ -1299,6 +1303,8 @@ class TestRemediateMain:
     def test_failed_command_exits_1(self, tmp_path, monkeypatch):
         path, _ = _report_with_fixable(tmp_path)
         monkeypatch.setattr(ec._remediate, "_run_fix_cmd", lambda cmd: (1, "permission denied"))
+        monkeypatch.setattr(ec._remediate, "_live_fix_cmds",
+                            lambda: {"sysctl -w net.ipv4.tcp_syncookies=1"})
         with pytest.raises(SystemExit) as exc:
             ec._remediate_main([path, "--all", "--yes"])
         assert exc.value.code == 1
@@ -1326,7 +1332,11 @@ class TestRemediateMain:
 # ── _compute_score ──────────────────────────────────────────────────────────────
 
 def _report_with_severities(*severities):
-    findings = [{"severity": s, "label": s, "why": "", "fix": "", "fix_cmds": []}
+    # Findings carry a non-empty fix_cmds: only actionable (fixable) findings
+    # deduct from the score — unfixable/informational ones are shown but never
+    # penalise the user. See test_unfixable_finding_does_not_deduct.
+    findings = [{"severity": s, "label": s, "why": "", "fix": "",
+                 "fix_cmds": ["echo fix"]}
                 for s in severities]
     return {"timestamp": "t", "checks": [{"check": "X", "findings": findings}]}
 
@@ -1364,6 +1374,16 @@ class TestComputeScore:
     def test_review_deducts_1(self):
         score, _ = ec._compute_score(_report_with_severities("REVIEW"))
         assert score == 99
+
+    def test_unfixable_finding_does_not_deduct(self):
+        # A CRITICAL with no fix_cmds is informational from the score's view:
+        # the user can't one-click fix it, so it must not lower their grade.
+        data = {"checks": [{"check": "X", "findings": [
+            {"severity": "CRITICAL", "label": "c", "why": "", "fix": "", "fix_cmds": []},
+        ]}]}
+        score, grade = ec._compute_score(data)
+        assert score == 100
+        assert grade == "A"
 
     def test_info_deducts_nothing(self):
         score, _ = ec._compute_score(_report_with_severities("INFO"))

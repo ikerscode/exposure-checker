@@ -158,3 +158,56 @@ class TestPosixPathFixInjection:
         path = "/srv/data/" + name
         cmd = f"chmod o-w {ec._shell_quote(path)}"
         assert posix_tokens(cmd) == ["chmod", "o-w", path], cmd
+
+
+# ── remediate-from-report rejects tampered commands (2.3) ───────────────────────
+
+class TestRemediateRevalidation:
+    def test_tampered_report_command_is_not_executed(self, tmp_path, monkeypatch, capsys):
+        import json
+        from exposure_checker import _remediate
+
+        # A report whose fix_cmds were edited to smuggle in an attacker command
+        # alongside a legitimate one.
+        report = {"timestamp": "t", "checks": [{"check": "X", "findings": [
+            {"severity": "HIGH", "label": "legit", "why": "", "fix": "",
+             "fix_cmds": ["echo legit-fix"]},
+            {"severity": "HIGH", "label": "evil", "why": "", "fix": "",
+             "fix_cmds": ["touch /tmp/PWNED_by_tampered_report"]},
+        ]}]}
+        rpath = tmp_path / "tampered.json"
+        rpath.write_text(json.dumps(report))
+
+        # Live scan only vouches for the legit command — the injected one is absent.
+        monkeypatch.setattr(_remediate, "_live_fix_cmds", lambda: {"echo legit-fix"})
+
+        ran = []
+        monkeypatch.setattr(_remediate, "_run_fix_cmd",
+                            lambda cmd: (ran.append(cmd) or (0, "")))
+
+        # The legit fix succeeds and the injected one is skipped (not failed), so
+        # the run completes without sys.exit.
+        _remediate._remediate_main([str(rpath), "--all", "--yes"])
+
+        assert "echo legit-fix" in ran
+        assert "touch /tmp/PWNED_by_tampered_report" not in ran
+
+    def test_yes_refused_when_validation_unavailable(self, tmp_path, monkeypatch):
+        import json
+        from exposure_checker import _remediate
+
+        report = {"timestamp": "t", "checks": [{"check": "X", "findings": [
+            {"severity": "HIGH", "label": "a", "why": "", "fix": "",
+             "fix_cmds": ["echo x"]},
+        ]}]}
+        rpath = tmp_path / "r.json"
+        rpath.write_text(json.dumps(report))
+
+        monkeypatch.setattr(_remediate, "_live_fix_cmds", lambda: None)
+        ran = []
+        monkeypatch.setattr(_remediate, "_run_fix_cmd",
+                            lambda cmd: (ran.append(cmd) or (0, "")))
+
+        with pytest.raises(SystemExit):
+            _remediate._remediate_main([str(rpath), "--all", "--yes"])
+        assert ran == []   # nothing ran — --yes refused without validation

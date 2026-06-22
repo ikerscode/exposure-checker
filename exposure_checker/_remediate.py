@@ -5,6 +5,12 @@ in checks/*.py, never built from untrusted/user/env-derived input.  shell=True i
 intentional for POSIX (allows pipes and redirects in fix_cmds); Windows uses an
 explicit powershell argv list instead.  Any fix_cmd that interpolates a filesystem
 path MUST use shlex.quote() (POSIX) or _ps_quote() (PowerShell).
+
+When applying fixes from a saved report (`gullwing remediate`), that report is
+untrusted input once it's a file on disk. Before execution every command is
+re-validated against a fresh live scan (_live_fix_cmds): only commands the
+current scanners actually produce are run, so a tampered report cannot smuggle
+arbitrary commands into _run_fix_cmd() — even under --all --yes.
 """
 
 import argparse
@@ -63,6 +69,32 @@ def _check_disk_space(min_mb: int = 50):
     except OSError:
         pass
     return None
+
+
+def _live_fix_cmds():
+    """Set of fix_cmds the live scanners currently produce, or None if a fresh
+    scan can't be run.
+
+    A report is untrusted input once it's a file on disk, so before executing
+    anything we re-derive what the current system would legitimately fix and only
+    trust commands that appear there. This neutralises a tampered report whose
+    fix_cmds were edited to smuggle in arbitrary commands.
+    """
+    try:
+        from ._notify import scan_to_report, SCANNABLE_TABS  # lazy: avoids import cycle
+    except Exception:
+        return None
+    cmds = set()
+    for tab in SCANNABLE_TABS:
+        try:
+            data = scan_to_report(tab)
+        except Exception:
+            continue
+        for chk in data.get("checks", []):
+            for f in chk.get("findings", []):
+                for c in (f.get("fix_cmds") or []):
+                    cmds.add(c)
+    return cmds
 
 
 def _collect_fixable(report_data):
@@ -166,13 +198,31 @@ def _remediate_main(argv):
                     sys.exit(1)
                 selected.append(n - 1)
 
+    # Re-validate against a fresh scan before touching the system: a report on
+    # disk is untrusted input, so only run commands the live scanners currently
+    # vouch for. Tampered/injected commands won't appear and are refused — this
+    # is the guard that makes `--all --yes` safe.
+    print("\nRe-validating fixes against a live scan of this system…")
+    validated = _live_fix_cmds()
+    if validated is None and args.yes:
+        print("[!] Could not re-validate against a live scan; refusing --yes for "
+              "safety.\n    Re-run without --yes to review and confirm each command.",
+              file=sys.stderr)
+        sys.exit(1)
+
     # Execute
     failed = 0
+    skipped_untrusted = 0
     for idx in selected:
         item = fixable[idx]
         print(f"\n── Fixing [{item['severity']}] {item['label']} ──")
         for cmd in item["fix_cmds"]:
             print(f"  $ {cmd}")
+            if validated is not None and cmd not in validated:
+                print("  ⚠ Skipped — not produced by a fresh scan of this system "
+                      "(stale fix or untrusted report).")
+                skipped_untrusted += 1
+                continue
             if not args.yes:
                 try:
                     confirm = input("  Run this command? [y/N] ").strip().lower()
@@ -189,6 +239,9 @@ def _remediate_main(argv):
                 print(f"  ✗ FAILED (exit {rc})" + (f": {out}" if out else ""))
                 failed += 1
 
+    if skipped_untrusted:
+        print(f"\n[!] {skipped_untrusted} command(s) skipped — not vouched for by "
+              "a live scan (stale fix or tampered report).", file=sys.stderr)
     if failed:
         print(f"\n[!] {failed} command(s) failed.", file=sys.stderr)
         sys.exit(1)
