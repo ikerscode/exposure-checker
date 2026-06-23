@@ -2244,7 +2244,7 @@ def _check_memory_linux(reporter) -> int:
                     "and reduces shader-cache jitter.",
                     f"Switch {dev} to mq-deadline.",
                     fix_cmds=[
-                        f"echo mq-deadline > /sys/block/{dev}/queue/scheduler"
+                        f"echo mq-deadline > /sys/block/{_shell_quote(dev)}/queue/scheduler"
                     ],
                 )
                 n += 1
