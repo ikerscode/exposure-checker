@@ -213,18 +213,26 @@ class TestRemediateRevalidation:
         assert ran == []   # nothing ran — --yes refused without validation
 
 
-# ── Static guard: no raw quote-brace interpolation in executed commands ──────────
+# ── Static guard: no raw quote-adjacent interpolation in executed commands ───────
 #
-# This is the mechanical enforcement of the invariant. It parses every checks/*.py
-# module and, *within executed-command contexts only* (_ps(...), _run(...),
-# _run_fix_cmd(...), and fix_cmds=[...] / fix_cmds=[...] assignments), flags any
-# f-string interpolation that sits immediately against a quote character unless the
-# interpolated value is produced by a quote helper (_ps_quote / _shell_quote /
-# shlex.quote). Message/description text (label/why/fix) is never scanned, so
-# human-readable strings keep their natural quoting.
-#
+# This catches ONE specific dangerous shape — an inline quote-adjacent f-string
+# interpolation ('{x}' or "{x}") whose value isn't a quote helper — within
+# executed-command contexts only (_ps(...), _run(...), _run_fix_cmd(...), and
+# fix_cmds=[...] / fix_cmds=[...] assignments). Message/description text
+# (label/why/fix) is never scanned, so human-readable strings keep their quoting.
 # Reintroducing the temp-executable pattern  Remove-Item -Path '{path}' ...  makes
-# this test fail (demonstrated in test_guard_catches_reintroduced_vuln).
+# this test fail (see test_guard_catches_reintroduced_vuln).
+#
+# It is NOT full mechanical enforcement of the injection-safety invariant. It does
+# NOT catch:
+#   - bare (non-quote-adjacent) interpolations, e.g.  echo x > /sys/.../{dev}/...
+#     or  {cmd_prefix} arg  — a value not wedged against a quote slips through;
+#   - values quoted in an intermediate variable then interpolated by name
+#     (the guard only sees the Name, not how it was built);
+#   - f-strings returned from helper functions (e.g. _sshd_* builders) that feed
+#     fix_cmds elsewhere — only the direct call/keyword sites are scanned.
+# Those cases still rely on code review and on every value passing through a quote
+# helper at construction time.
 
 import ast
 import glob
