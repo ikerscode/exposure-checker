@@ -127,6 +127,32 @@ def tint_hex(base: str, color: str, alpha: float) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def round_rect(canvas, x1, y1, x2, y2, radius, **kwargs):
+    """Draw a filled rounded rectangle on a Tkinter Canvas; return the item id.
+
+    Implemented as a smoothed polygon: the corner points are listed three-per-
+    corner and ``smooth=True`` rounds them into arcs. Accepts the usual
+    create_polygon kwargs (``fill``, ``outline``, ``width``, ``tags``, …) so
+    callers can pass e.g. ``fill=T.SURFACE, outline=T.BORDER``.
+    """
+    r = max(0, min(radius, (x2 - x1) / 2, (y2 - y1) / 2))
+    points = [
+        x1 + r, y1,
+        x2 - r, y1,
+        x2,     y1,
+        x2,     y1 + r,
+        x2,     y2 - r,
+        x2,     y2,
+        x2 - r, y2,
+        x1 + r, y2,
+        x1,     y2,
+        x1,     y2 - r,
+        x1,     y1 + r,
+        x1,     y1,
+    ]
+    return canvas.create_polygon(points, smooth=True, **kwargs)
+
+
 def _asset_path(rel: str) -> str:
     """Resolve a path relative to gui/assets/, PyInstaller-aware."""
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):

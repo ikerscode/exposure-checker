@@ -1359,21 +1359,28 @@ class _FindingsPane:
     # ── Card builder ──────────────────────────────────────────────────────────
 
     def _build_card(self, f: dict):
+        card = tk.Canvas(self._inner, bg=C["bg"], highlightthickness=0, bd=0)
+        card.pack(fill=tk.X, padx=12, pady=(8, 0))
+        self._cards.append(card)
+        self._render_card(card, f)
+
+    def _render_card(self, card: tk.Canvas, f: dict):
+        """Build the finding's content frame and embed it in `card` (a Canvas)
+        over a rounded-rect background. The stripe, label, why-text and the
+        Fix / ⋯ buttons are unchanged and stay clickable inside the content frame."""
         accepted = f.get("_accepted", False)
         sev      = f.get("severity", "REVIEW")
         stripe   = self._STRIPE.get(sev, C["muted"]) if not accepted else C["border"]
         sev_cap  = self._SEV_CAP.get(sev, sev.title())
         card_bg  = C["panel"] if not accepted else C["bg"]
 
-        card = tk.Frame(self._inner, bg=card_bg,
-                        highlightthickness=1,
-                        highlightbackground=C["border"])
-        card.pack(fill=tk.X, padx=12, pady=(8, 0))
-        self._cards.append(card)
+        # Content frame is card_bg so its rectangular fill blends with the rounded
+        # background; the corners reveal the parent surface (the Canvas bg).
+        content = tk.Frame(card, bg=card_bg)
 
-        tk.Frame(card, bg=stripe, width=4).pack(side=tk.LEFT, fill=tk.Y)
+        tk.Frame(content, bg=stripe, width=4).pack(side=tk.LEFT, fill=tk.Y)
 
-        body = tk.Frame(card, bg=card_bg)
+        body = tk.Frame(content, bg=card_bg)
         body.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 8), pady=9)
 
         # Severity badge + check name row
@@ -1415,7 +1422,7 @@ class _FindingsPane:
                      justify=tk.LEFT).pack(fill=tk.X)
 
         # Right-side action column
-        right_f = tk.Frame(card, bg=card_bg)
+        right_f = tk.Frame(content, bg=card_bg)
         right_f.pack(side=tk.RIGHT, padx=(4, 8), pady=9)
 
         if f.get("fix_cmds") and self._on_fix_one and not accepted:
@@ -1431,7 +1438,36 @@ class _FindingsPane:
             command=lambda _f=f, _c=card: self._open_overflow(_f, _c))
         overflow.pack()
 
+        self._embed_rounded_card(card, content, card_bg)
         self._bind_scroll(card)
+
+    def _embed_rounded_card(self, card: tk.Canvas, content: tk.Frame, card_bg: str):
+        """Place `content` on `card` over a rounded-rect background sized to fit it.
+        The canvas height tracks the content height; the rounded rect is redrawn on
+        resize so corners stay crisp."""
+        pad = 4   # inset so the rounded corners reveal the parent surface behind
+        cid = card.create_window(pad, pad, window=content, anchor="nw")
+
+        def _redraw(w, h):
+            if w < 2 or h < 2:
+                return
+            card.delete("cardbg")
+            T.round_rect(card, 1, 1, w - 1, h - 1, radius=T.RADIUS_CARD,
+                         fill=card_bg, outline=C["border"], tags="cardbg")
+            card.tag_lower("cardbg")
+
+        def _on_canvas_cfg(e):
+            card.itemconfigure(cid, width=e.width - 2 * pad)
+            _redraw(e.width, card.winfo_height())
+
+        def _on_content_cfg(e):
+            h = e.height + 2 * pad
+            if card.winfo_height() != h:
+                card.configure(height=h)
+            _redraw(card.winfo_width(), h)
+
+        card.bind("<Configure>", _on_canvas_cfg)
+        content.bind("<Configure>", _on_content_cfg)
 
     def _open_overflow(self, f: dict, card: tk.Frame):
         check = f.get("check", "")
@@ -1457,65 +1493,15 @@ class _FindingsPane:
 
     def _build_card_at(self, f: dict, idx: int):
         """Rebuild a single card at a specific index position."""
-        # Save packing position by temporarily recording neighbor
         cards_before = self._cards[:idx]
-        cards_after  = self._cards[idx + 1:]
-        # Destroy old placeholder and rebuild
-        accepted = f.get("_accepted", False)
-        sev      = f.get("severity", "REVIEW")
-        stripe   = self._STRIPE.get(sev, C["muted"]) if not accepted else C["border"]
-        sev_cap  = self._SEV_CAP.get(sev, sev.title())
-        card_bg  = C["panel"] if not accepted else C["bg"]
-
-        card = tk.Frame(self._inner, bg=card_bg,
-                        highlightthickness=1,
-                        highlightbackground=C["border"])
-        # Pack after the card before us
+        card = tk.Canvas(self._inner, bg=C["bg"], highlightthickness=0, bd=0)
+        # Pack after the card before us so position is preserved.
         if cards_before and cards_before[-1].winfo_exists():
-            card.pack(fill=tk.X, padx=12, pady=(8, 0),
-                      after=cards_before[-1])
+            card.pack(fill=tk.X, padx=12, pady=(8, 0), after=cards_before[-1])
         else:
             card.pack(fill=tk.X, padx=12, pady=(8, 0))
         self._cards[idx] = card
-
-        tk.Frame(card, bg=stripe, width=4).pack(side=tk.LEFT, fill=tk.Y)
-        body = tk.Frame(card, bg=card_bg)
-        body.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 8), pady=9)
-        top = tk.Frame(body, bg=card_bg)
-        top.pack(fill=tk.X)
-        badge_bg = stripe if not accepted else C["input"]
-        badge_fg = "#060a0f" if not accepted else C["muted"]
-        tk.Label(top, text=sev_cap.upper(), bg=badge_bg, fg=badge_fg,
-                 font=("TkDefaultFont", 7, "bold"), padx=6, pady=2).pack(side=tk.LEFT)
-        check_txt = f.get("check", "")
-        if check_txt:
-            tk.Label(top, text=f"  {check_txt}", bg=card_bg, fg=C["muted"],
-                     font=("TkDefaultFont", 8)).pack(side=tk.LEFT)
-        if accepted:
-            tk.Label(top, text="  Accepted risk", bg=card_bg, fg=C["ok"],
-                     font=("TkDefaultFont", 7, "bold")).pack(side=tk.LEFT)
-        title_fg = C["muted"] if accepted else C["text"]
-        tk.Label(body, text=f.get("label", ""), bg=card_bg, fg=title_fg,
-                 font=("TkDefaultFont", 10, "bold"),
-                 anchor="w", wraplength=500, justify=tk.LEFT).pack(
-            fill=tk.X, pady=(5, 2))
-        why = f.get("why", "")
-        if why and not accepted:
-            tk.Label(body, text=why, bg=card_bg, fg=C["muted"],
-                     font=("TkDefaultFont", 9),
-                     anchor="w", wraplength=500, justify=tk.LEFT).pack(fill=tk.X)
-        right_f = tk.Frame(card, bg=card_bg)
-        right_f.pack(side=tk.RIGHT, padx=(4, 8), pady=9)
-        if f.get("fix_cmds") and self._on_fix_one and not accepted:
-            btn = ttk.Button(right_f, text="Fix this →", style="Fix.TButton",
-                              command=lambda _f=f: self._on_fix_one(_f))
-            btn.pack(pady=(0, 4))
-            f["_fix_btn"] = btn
-        overflow = ttk.Button(
-            right_f, text="⋯", style="Dim.TButton", width=2,
-            command=lambda _f=f, _c=card: self._open_overflow(_f, _c))
-        overflow.pack()
-        self._bind_scroll(card)
+        self._render_card(card, f)
 
     def _bind_scroll(self, widget):
         for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
