@@ -108,13 +108,16 @@ _SSHD_RELOAD = (
 def _sshd_fix(directive, value):
     """Fix commands: set or add a directive in /etc/ssh/sshd_config and reload."""
     cfg = "/etc/ssh/sshd_config"
+    qcfg = shlex.quote(cfg)
     pat = f"^[[:space:]]*#*[[:space:]]*{directive}[[:space:]]"
     replacement = f"{directive} {value}"
+    # pat/replacement stay inside sed's own '…' / printf '…' delimiters (regex
+    # context); the path is shell-quoted. directive/value are tool constants.
     return [
         (
-            f"( grep -qE '{pat}' {cfg} "
-            f"&& sed -i 's|{pat}.*|{replacement}|' {cfg} ) "
-            f"|| printf '\\n{replacement}\\n' >> {cfg}"
+            f"( grep -qE {shlex.quote(pat)} {qcfg} "
+            f"&& sed -i 's|{pat}.*|{replacement}|' {qcfg} ) "
+            f"|| printf '\\n{replacement}\\n' >> {qcfg}"
         ),
         _SSHD_RELOAD,
     ]
@@ -124,7 +127,7 @@ def _sshd_remove(directive):
     """Fix commands: remove a deprecated directive from /etc/ssh/sshd_config."""
     cfg = "/etc/ssh/sshd_config"
     return [
-        f"sed -i '/^[[:space:]]*#*[[:space:]]*{directive}[[:space:]]/d' {cfg}",
+        f"sed -i '/^[[:space:]]*#*[[:space:]]*{directive}[[:space:]]/d' {shlex.quote(cfg)}",
         _SSHD_RELOAD,
     ]
 
@@ -133,8 +136,10 @@ def _sshd_fix_windows(directive, value):
     """PowerShell fix commands: set or add a directive in sshd_config on Windows."""
     cfg = _SSHD_CONFIG_WINDOWS
     pat = f"(?im)^#?\\s*{re.escape(directive)}\\s+.*"
+    repl = f"{directive} {value}"
     return [
-        f"(Get-Content '{cfg}') -replace '{pat}', '{directive} {value}' | Set-Content '{cfg}'",
+        f"(Get-Content {_ps_quote(cfg)}) -replace {_ps_quote(pat)}, {_ps_quote(repl)} "
+        f"| Set-Content {_ps_quote(cfg)}",
         "Restart-Service sshd -ErrorAction SilentlyContinue",
     ]
 
@@ -144,7 +149,8 @@ def _sshd_remove_windows(directive):
     cfg = _SSHD_CONFIG_WINDOWS
     pat = f"(?im)^\\s*{re.escape(directive)}\\s"
     return [
-        f"(Get-Content '{cfg}') | Where-Object {{ $_ -notmatch '{pat}' }} | Set-Content '{cfg}'",
+        f"(Get-Content {_ps_quote(cfg)}) | Where-Object {{ $_ -notmatch {_ps_quote(pat)} }} "
+        f"| Set-Content {_ps_quote(cfg)}",
         "Restart-Service sshd -ErrorAction SilentlyContinue",
     ]
 
@@ -963,8 +969,9 @@ def _check_world_writable_windows(reporter):
     for check_dir in _WORLD_WRITABLE_DIRS_WINDOWS:
         if not os.path.isdir(check_dir):
             continue
+        target = _ps_quote(check_dir + "\\*")
         out, rc = _ps(
-            f'icacls "{check_dir}\\*" 2>$null | '
+            f"icacls {target} 2>$null | "
             "Select-String 'Everyone.*(M|F|W)' | Select-Object -First 10 -ExpandProperty Line",
             timeout=45,
         )
@@ -1607,7 +1614,7 @@ def _check_sensitive_perms_windows(reporter):
         if not os.path.exists(path):
             continue
         out, rc = _ps(
-            f'(Get-Acl "{path}").Access '
+            f"(Get-Acl {_ps_quote(path)}).Access "
             "| Select-Object IdentityReference,FileSystemRights | ConvertTo-Json"
         )
         if rc == 0 and "Everyone" in out:
@@ -1869,7 +1876,7 @@ def _check_docker_socket_windows(reporter):
         return
 
     out, rc = _ps(
-        f"(Get-Acl -Path '{pipe_path}' -ErrorAction SilentlyContinue).Access "
+        f"(Get-Acl -Path {_ps_quote(pipe_path)} -ErrorAction SilentlyContinue).Access "
         "| Select-Object IdentityReference,FileSystemRights | ConvertTo-Json"
     )
     if rc != 0 or not out.strip() or out.strip() == "null":
@@ -2184,7 +2191,7 @@ def _check_windows_registry_persistence(reporter):
     """Flag suspicious entries in common Windows autostart registry keys."""
     for key in _WIN_AUTORUN_KEYS:
         out, rc = _ps(
-            f"Get-ItemProperty -Path '{key}' -ErrorAction SilentlyContinue | ConvertTo-Json"
+            f"Get-ItemProperty -Path {_ps_quote(key)} -ErrorAction SilentlyContinue | ConvertTo-Json"
         )
         if rc != 0 or not out.strip():
             continue
@@ -3056,7 +3063,7 @@ def check_packages(reporter):
 
     upgrade_cmd = (
         "DEBIAN_FRONTEND=noninteractive apt-get upgrade -y"
-        if apt_path else f"{dnf_path} upgrade -y"
+        if apt_path else f"{_shell_quote(dnf_path)} upgrade -y"
     )
     if security:
         preview = ", ".join(security[:5])

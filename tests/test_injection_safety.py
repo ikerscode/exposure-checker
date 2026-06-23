@@ -211,3 +211,136 @@ class TestRemediateRevalidation:
         with pytest.raises(SystemExit):
             _remediate._remediate_main([str(rpath), "--all", "--yes"])
         assert ran == []   # nothing ran — --yes refused without validation
+
+
+# ── Static guard: no raw quote-brace interpolation in executed commands ──────────
+#
+# This is the mechanical enforcement of the invariant. It parses every checks/*.py
+# module and, *within executed-command contexts only* (_ps(...), _run(...),
+# _run_fix_cmd(...), and fix_cmds=[...] / fix_cmds=[...] assignments), flags any
+# f-string interpolation that sits immediately against a quote character unless the
+# interpolated value is produced by a quote helper (_ps_quote / _shell_quote /
+# shlex.quote). Message/description text (label/why/fix) is never scanned, so
+# human-readable strings keep their natural quoting.
+#
+# Reintroducing the temp-executable pattern  Remove-Item -Path '{path}' ...  makes
+# this test fail (demonstrated in test_guard_catches_reintroduced_vuln).
+
+import ast
+import glob
+
+_CHECKS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                           "exposure_checker", "checks")
+_RUNNER_FUNCS = {"_ps", "_run", "_run_fix_cmd"}
+_QUOTERS = {"_ps_quote", "_shell_quote", "quote"}  # quote == shlex.quote / *.quote
+
+
+def _is_quoter_call(node):
+    if not isinstance(node, ast.Call):
+        return False
+    f = node.func
+    if isinstance(f, ast.Name):
+        return f.id in _QUOTERS
+    if isinstance(f, ast.Attribute):
+        return f.attr in _QUOTERS
+    return False
+
+
+def _raw_quoted_interpolations(joined: ast.JoinedStr):
+    """Yield FormattedValue nodes that sit against a quote char and are not a
+    quote-helper call (i.e. the dangerous '{value}' / "{value}" shape)."""
+    vals = joined.values
+    for i, v in enumerate(vals):
+        if not isinstance(v, ast.FormattedValue):
+            continue
+        prev = vals[i - 1] if i > 0 else None
+        nxt = vals[i + 1] if i + 1 < len(vals) else None
+        prev_q = (isinstance(prev, ast.Constant) and isinstance(prev.value, str)
+                  and prev.value and prev.value[-1] in "'\"")
+        next_q = (isinstance(nxt, ast.Constant) and isinstance(nxt.value, str)
+                  and nxt.value and nxt.value[0] in "'\"")
+        if (prev_q or next_q) and not _is_quoter_call(v.value):
+            yield v
+
+
+def _command_joinedstrs(tree: ast.AST):
+    """Yield every JoinedStr that lives in an executed-command context."""
+    out = []
+
+    def collect(node):
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.JoinedStr):
+                out.append(sub)
+
+    for node in ast.walk(tree):
+        # _ps(...), _run(...), _run_fix_cmd(...)
+        if isinstance(node, ast.Call):
+            fn = node.func
+            name = fn.id if isinstance(fn, ast.Name) else (
+                fn.attr if isinstance(fn, ast.Attribute) else None)
+            if name in _RUNNER_FUNCS:
+                for a in node.args:
+                    collect(a)
+            # fix_cmds=[...] keyword
+            for kw in node.keywords:
+                if kw.arg == "fix_cmds":
+                    collect(kw.value)
+        # fix_cmds = [...] / fix_cmds: list = [...]
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == "fix_cmds":
+                    collect(node.value)
+        if isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Name) and node.target.id == "fix_cmds":
+                if node.value is not None:
+                    collect(node.value)
+    return out
+
+
+def _scan_source(src: str):
+    tree = ast.parse(src)
+    offenders = []
+    for joined in _command_joinedstrs(tree):
+        for fv in _raw_quoted_interpolations(joined):
+            offenders.append(getattr(fv, "lineno", -1))
+    return offenders
+
+
+class TestNoRawQuotedInterpolations:
+    def test_all_check_modules_are_clean(self):
+        problems = {}
+        for path in sorted(glob.glob(os.path.join(_CHECKS_DIR, "*.py"))):
+            offenders = _scan_source(open(path, encoding="utf-8").read())
+            if offenders:
+                problems[os.path.basename(path)] = offenders
+        assert not problems, (
+            "Raw quote-brace interpolation in an executed command (use "
+            "_ps_quote/_shell_quote/shlex.quote):\n" +
+            "\n".join(f"  {f}: lines {ls}" for f, ls in problems.items()))
+
+    def test_guard_catches_reintroduced_vuln(self):
+        # The exact shape of the original temp-executable RCE must be caught.
+        vuln = (
+            "def f(path):\n"
+            "    reporter.finding('HIGH', 'x', 'y', 'z',\n"
+            "        fix_cmds=[f\"Remove-Item -Path '{path}' -Force\"])\n"
+        )
+        assert _scan_source(vuln), "guard failed to flag the reintroduced vuln"
+
+        # And the fixed shape must be accepted.
+        safe = (
+            "def f(path):\n"
+            "    reporter.finding('HIGH', 'x', 'y', 'z',\n"
+            "        fix_cmds=[f\"Remove-Item -Path {_ps_quote(path)} -Force\"])\n"
+        )
+        assert not _scan_source(safe), "guard wrongly flagged the safe form"
+
+    def test_guard_ignores_message_text(self):
+        # A raw-quoted interpolation in description text (not an executed context)
+        # must NOT be flagged.
+        msg = (
+            "def f(path):\n"
+            "    reporter.finding('HIGH', 'x',\n"
+            "        f\"'{path}' is suspicious\", 'fix text')\n"
+        )
+        assert not _scan_source(msg), "guard wrongly flagged message text"
