@@ -25,10 +25,106 @@ import webbrowser
 _UI_OS = platform.system()  # "Linux" | "Darwin" | "Windows"
 
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, font as tkfont, messagebox, ttk
 
 import exposure_checker as ec
 from exposure_checker.gui import theme as T
+
+
+def _sev_pill(parent, text, bg, fg):
+    """A small rounded severity badge (Canvas) — the rounded replacement for the
+    rectangular padded Label. Returns the Canvas; caller packs it. Colors are
+    passed through unchanged; the text is rendered uppercase."""
+    text = str(text).upper()
+    pad_x, pad_y = 7, 3
+    fnt = tkfont.Font(font=T.font_ui(7, "bold"))
+    w = fnt.measure(text) + 2 * pad_x
+    h = fnt.metrics("linespace") + 2 * pad_y
+    cv = tk.Canvas(parent, width=w, height=h, bg=parent["bg"],
+                   highlightthickness=0, bd=0)
+    T.round_rect(cv, 0, 0, w, h, radius=T.RADIUS_PILL, fill=bg, outline="")
+    cv.create_text(w / 2, h / 2, text=text, fill=fg,
+                   font=T.font_ui(7, "bold"), anchor="center")
+    return cv
+
+
+class RoundButton(tk.Canvas):
+    """A rounded-rect button drawn on a Canvas, with hover and disabled states.
+
+    Intentionally accepts the ttk-style ``configure(state=…, text=…, style=…)``
+    calls the app already makes on its hero buttons, so existing call sites work
+    unchanged (``style`` is ignored; ``state``/``text`` drive a redraw)."""
+
+    def __init__(self, parent, text="", command=None, bg=None, fg="#060a0f",
+                 hover=None, font=None, padx=20, pady=9, state=tk.NORMAL, **kw):
+        self._text    = text
+        self._command = command
+        self._bg      = bg or C["accent"]
+        self._fg      = fg
+        self._hover   = hover or T.tint_hex(self._bg, "#ffffff", 0.14)
+        self._font    = font or T.font_ui(10, "bold")
+        self._enabled = (str(state) == str(tk.NORMAL))
+        self._hovering = False
+        try:
+            cbg = parent["bg"]
+        except tk.TclError:
+            cbg = C["bg"]
+        fnt = tkfont.Font(font=self._font)
+        w = fnt.measure(text or "M") + 2 * padx
+        h = fnt.metrics("linespace") + 2 * pady
+        super().__init__(parent, width=w, height=h, bg=cbg,
+                         highlightthickness=0, bd=0, **kw)
+        self.bind("<Configure>", lambda _e: self._redraw())
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<Button-1>", self._on_click)
+        self._redraw()
+
+    def _fill(self):
+        if not self._enabled:
+            return C["input"]
+        return self._hover if self._hovering else self._bg
+
+    def _redraw(self):
+        self.delete("all")
+        w = self.winfo_width() or int(self["width"])
+        h = self.winfo_height() or int(self["height"])
+        T.round_rect(self, 1, 1, w - 1, h - 1, radius=T.RADIUS_BUTTON,
+                     fill=self._fill(), outline="")
+        self.create_text(w / 2, h / 2, text=self._text,
+                         fill=self._fg if self._enabled else C["muted"],
+                         font=self._font, anchor="center")
+        super().configure(cursor="hand2" if self._enabled else "")
+
+    def _on_enter(self, _e):
+        self._hovering = True
+        if self._enabled:
+            self._redraw()
+
+    def _on_leave(self, _e):
+        self._hovering = False
+        if self._enabled:
+            self._redraw()
+
+    def _on_click(self, _e):
+        if self._enabled and self._command:
+            self._command()
+
+    def configure(self, cnf=None, **kw):
+        redraw = False
+        if "state" in kw:
+            self._enabled = (str(kw.pop("state")) == str(tk.NORMAL))
+            redraw = True
+        if "text" in kw:
+            self._text = kw.pop("text")
+            redraw = True
+        kw.pop("style", None)   # RoundButton carries its own colors
+        result = super().configure(cnf, **kw) if (cnf is not None or kw) else None
+        if redraw:
+            self._redraw()
+        return result
+
+    config = configure
 
 
 def _enable_windows_dpi_awareness():
@@ -94,6 +190,15 @@ def _configure_style(root):
     s.map("TButton",
           background=[("active", "#2d333b"), ("pressed", border)],
           relief=[("pressed", "flat"), ("active", "flat")])
+    # Drop clam's dotted focus ring (the Button.focus element) for all *.TButton
+    # variants — derived styles inherit this layout.
+    s.layout("TButton", [
+        ("Button.border", {"sticky": "nswe", "border": "1", "children": [
+            ("Button.padding", {"sticky": "nswe", "children": [
+                ("Button.label", {"sticky": "nswe"})
+            ]})
+        ]})
+    ])
 
     s.configure("Accent.TButton", background=accent, foreground="#060a0f",
                  bordercolor=accent, font=("TkDefaultFont", 10, "bold"),
@@ -240,9 +345,9 @@ class CenterStage(tk.Canvas):
         self.create_arc(cx-r, cy-r, cx+r, cy+r, start=0, extent=359.9,
                         style=tk.ARC, outline=C["border"], width=self._rw)
         self.create_text(cx, cy - 8,  text="◆", fill=C["border"],
-                         font=("TkDefaultFont", 26), anchor="center")
+                         font=T.font_ui(26), anchor="center")
         self.create_text(cx, cy + 18, text="PRESS SCAN", fill=C["muted"],
-                         font=("TkDefaultFont", 9), anchor="center")
+                         font=T.font_ui(9), anchor="center")
 
     def _draw_radar(self):
         self.delete("all")
@@ -295,20 +400,30 @@ class CenterStage(tk.Canvas):
         self.create_arc(cx-r, cy-r, cx+r, cy+r, start=0, extent=359.9,
                         style=tk.ARC, outline=C["border"], width=rw)
         if self._score > 0:
+            sweep = self._score / 100 * 359.9
             self.create_arc(cx-r, cy-r, cx+r, cy+r,
-                            start=90, extent=-(self._score / 100 * 359.9),
+                            start=90, extent=-sweep,
                             style=tk.ARC, outline=color, width=rw)
+            # Fake rounded caps: a filled dot at each end of the swept arc
+            # (create_arc uses square caps Tkinter cannot round).
+            cap_r = rw / 2
+            for theta in (90.0, 90.0 - sweep):
+                rad = math.radians(theta)
+                px = cx + r * math.cos(rad)
+                py = cy - r * math.sin(rad)
+                self.create_oval(px - cap_r, py - cap_r, px + cap_r, py + cap_r,
+                                 fill=color, outline="")
         self.create_text(cx, cy - 16,
                          text=self._grade if self._grade != "—" else "?",
                          fill=color,
-                         font=("TkDefaultFont", 44, "bold"), anchor="center")
+                         font=T.font_ui(44, "bold"), anchor="center")
         self.create_text(cx, cy + 24, text=f"{self._score}/100",
-                         fill=C["muted"], font=("TkDefaultFont", 11),
+                         fill=C["muted"], font=T.font_mono(11),
                          anchor="center")
         if self._score == self._target and self._grade in _GRADE_LABEL:
             self.create_text(cx, cy + r + 16,
                              text=_GRADE_LABEL[self._grade], fill=color,
-                             font=("TkDefaultFont", 9, "bold"), anchor="center")
+                             font=T.font_ui(9, "bold"), anchor="center")
 
 
 # ── Severity bar row ───────────────────────────────────────────────────────────
@@ -922,6 +1037,92 @@ def _parse_batch_output(cmds, stdout):
             for i, cmd in enumerate(cmds)]
 
 
+def _assemble_preview_cmds(findings, force_sudo=None) -> str:
+    """The commands that will run, one per line — sudo-prefixed on POSIX when
+    elevation applies. Shared by the confirm dialog and the denied dialog so the
+    preview always matches what is actually executed."""
+    all_cmds = [cmd for f in findings for cmd in f.get("fix_cmds", [])]
+    if _UI_OS == "Windows":
+        return "\n".join(all_cmds)
+    use_sudo = (not _is_root()) if force_sudo is None else force_sudo
+    if use_sudo:
+        return "\n".join(f"sudo {c}" for c in all_cmds)
+    return "\n".join(all_cmds)
+
+
+def _confirm_fix_dialog(parent, findings) -> bool:
+    """Modal preview shown before any fix runs. Lists the actual commands in a
+    read-only monospace box and states whether the changes can be reverted.
+    Returns True to apply, False on Cancel or window close."""
+    n        = len(findings)
+    n_cmd    = sum(len(f.get("fix_cmds", [])) for f in findings)
+    cmds_txt = _assemble_preview_cmds(findings)
+    top      = parent.winfo_toplevel()
+    result   = {"ok": False}
+
+    dlg = tk.Toplevel(parent)
+    dlg.title("Apply fixes")
+    dlg.configure(bg=C["panel"])
+    dlg.resizable(False, False)
+    dlg.transient(top)
+
+    tk.Label(dlg, text=f"Apply {n} fix{'es' if n != 1 else ''}",
+             bg=C["panel"], fg=C["text"],
+             font=T.font_ui(13, "bold")).pack(padx=20, pady=(16, 2), anchor="w")
+    tk.Label(dlg, text=f"These {n_cmd} command(s) will run on your machine:",
+             bg=C["panel"], fg=C["muted"],
+             font=T.font_ui(9)).pack(padx=20, anchor="w")
+
+    # Read-only, scrollable, monospace command preview
+    tf = tk.Frame(dlg, bg=C["panel"])
+    tf.pack(fill=tk.BOTH, expand=True, padx=20, pady=(6, 8))
+    txt = tk.Text(tf, height=min(max(n_cmd, 3), 12), width=66,
+                  bg=C["log_bg"], fg=C["cmd"], font=T.font_mono(9),
+                  relief=tk.FLAT, wrap=tk.NONE, padx=8, pady=6)
+    sb = ttk.Scrollbar(tf, orient=tk.VERTICAL, command=txt.yview)
+    txt.configure(yscrollcommand=sb.set)
+    txt.insert("1.0", cmds_txt)
+    txt.configure(state=tk.DISABLED)
+    sb.pack(side=tk.RIGHT, fill=tk.Y)
+    txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    # Reversibility status
+    non_rev = [f.get("label", "?") for f in findings if f.get("revertable") is False]
+    if non_rev:
+        rev_text, rev_fg = "⚠ Cannot be undone: " + ", ".join(non_rev), C["HIGH"]
+    else:
+        rev_text, rev_fg = ("↩  Changes are snapshotted and can be reverted "
+                            "this session.", C["ok"])
+    tk.Label(dlg, text=rev_text, bg=C["panel"], fg=rev_fg,
+             font=T.font_ui(9), wraplength=470, justify=tk.LEFT).pack(
+        padx=20, anchor="w")
+
+    if not _is_root() and _UI_OS != "Windows":
+        tk.Label(dlg, text="You will be asked for your password once for all fixes.",
+                 bg=C["panel"], fg=C["muted"], font=T.font_ui(8)).pack(
+            padx=20, anchor="w", pady=(2, 0))
+
+    bf = tk.Frame(dlg, bg=C["panel"])
+    bf.pack(padx=20, pady=(10, 16), anchor="e")
+
+    def _apply():
+        result["ok"] = True
+        dlg.destroy()
+
+    def _cancel():
+        result["ok"] = False
+        dlg.destroy()
+
+    ttk.Button(bf, text=f"Apply {n} fix{'es' if n != 1 else ''}",
+               style="Accent.TButton", command=_apply).pack(side=tk.RIGHT)
+    ttk.Button(bf, text="Cancel", command=_cancel).pack(side=tk.RIGHT, padx=(0, 8))
+    dlg.protocol("WM_DELETE_WINDOW", _cancel)
+
+    dlg.grab_set()
+    top.wait_window(dlg)
+    return result["ok"]
+
+
 def _show_fix_denied_dialog(root, findings):
     all_cmds = [cmd for f in findings for cmd in f.get("fix_cmds", [])]
     if not all_cmds:
@@ -934,13 +1135,12 @@ def _show_fix_denied_dialog(root, findings):
 
     tk.Label(dlg, text="Admin Access Required",
              bg=C["panel"], fg=C["text"],
-             font=("TkDefaultFont", 12, "bold")).pack(pady=(18, 4), padx=20)
+             font=T.font_ui(12, "bold")).pack(pady=(18, 4), padx=20)
     if _UI_OS == "Windows":
         run_hint = "Run these commands in an elevated (Administrator) PowerShell."
-        cmds_text = "\n".join(all_cmds)
     else:
         run_hint = "Run these commands in a terminal, or launch\ngullwing-ui with sudo to auto-apply."
-        cmds_text = "\n".join(f"sudo {c}" for c in all_cmds)
+    cmds_text = _assemble_preview_cmds(findings, force_sudo=True)
     tk.Label(dlg, text=run_hint,
              bg=C["panel"], fg=C["muted"],
              justify=tk.CENTER).pack(pady=(0, 10), padx=20)
@@ -1222,23 +1422,22 @@ class _FindingsPane:
 
         top = tk.Frame(body, bg=card_bg)
         top.pack(fill=tk.X)
-        tk.Label(top, text="INFO", bg=stripe, fg="#060a0f",
-                 font=("TkDefaultFont", 7, "bold"), padx=6, pady=2).pack(side=tk.LEFT)
+        _sev_pill(top, "INFO", stripe, "#060a0f").pack(side=tk.LEFT)
         if f.get("check"):
             tk.Label(top, text=f"  {f['check']}", bg=card_bg, fg=C["muted"],
-                     font=("TkDefaultFont", 8)).pack(side=tk.LEFT)
+                     font=T.font_ui(8)).pack(side=tk.LEFT)
         if accepted:
             tk.Label(top, text="  Accepted risk", bg=card_bg, fg=C["ok"],
-                     font=("TkDefaultFont", 7, "bold")).pack(side=tk.LEFT)
+                     font=T.font_ui(7, "bold")).pack(side=tk.LEFT)
 
         title_fg = C["muted"] if accepted else C["text"]
         tk.Label(body, text=f.get("label", ""), bg=card_bg, fg=title_fg,
-                 font=("TkDefaultFont", 10, "bold"),
+                 font=T.font_ui(10, "bold"),
                  anchor="w", wraplength=500, justify=tk.LEFT).pack(
             fill=tk.X, pady=(4, 0))
         if f.get("why") and not accepted:
             tk.Label(body, text=f["why"], bg=card_bg, fg=C["muted"],
-                     font=("TkDefaultFont", 9), anchor="w",
+                     font=T.font_ui(9), anchor="w",
                      wraplength=500, justify=tk.LEFT).pack(fill=tk.X, pady=(2, 0))
         self._bind_scroll(card)
         return card
@@ -1298,19 +1497,17 @@ class _FindingsPane:
 
         top_row = tk.Frame(body, bg=C["panel"])
         top_row.pack(fill=tk.X)
-        tk.Label(top_row, text=self._SEV_CAP.get(sev, sev),
-                 bg=col, fg="#ffffff",
-                 font=("TkDefaultFont", 7, "bold"),
-                 padx=5, pady=2).pack(side=tk.LEFT, padx=(0, 8))
+        _sev_pill(top_row, self._SEV_CAP.get(sev, sev), col, "#ffffff").pack(
+            side=tk.LEFT, padx=(0, 8))
         tk.Label(top_row, text=label,
                  bg=C["panel"], fg=C["text"],
-                 font=("TkDefaultFont", 9, "bold"),
+                 font=T.font_ui(9, "bold"),
                  anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         if why:
             tk.Label(body, text=why,
                      bg=C["panel"], fg=C["muted"],
-                     font=("TkDefaultFont", 8),
+                     font=T.font_ui(8),
                      anchor="w", wraplength=520,
                      justify=tk.LEFT).pack(fill=tk.X, pady=(3, 0))
 
@@ -1388,28 +1585,25 @@ class _FindingsPane:
         top.pack(fill=tk.X)
         badge_bg = stripe if not accepted else C["input"]
         badge_fg = "#060a0f" if not accepted else C["muted"]
-        tk.Label(top, text=sev_cap.upper(),
-                 bg=badge_bg, fg=badge_fg,
-                 font=("TkDefaultFont", 7, "bold"),
-                 padx=6, pady=2).pack(side=tk.LEFT)
+        _sev_pill(top, sev_cap, badge_bg, badge_fg).pack(side=tk.LEFT)
         check_txt = f.get("check", "")
         if check_txt:
             tk.Label(top, text=f"  {check_txt}",
                      bg=card_bg, fg=C["muted"],
-                     font=("TkDefaultFont", 8)).pack(side=tk.LEFT)
+                     font=T.font_ui(8)).pack(side=tk.LEFT)
         if accepted:
             tk.Label(top, text="  Accepted risk",
                      bg=card_bg, fg=C["ok"],
-                     font=("TkDefaultFont", 7, "bold")).pack(side=tk.LEFT)
+                     font=T.font_ui(7, "bold")).pack(side=tk.LEFT)
         elif f.get("revertable") is False:
             tk.Label(top, text="  Cannot be undone",
                      bg=card_bg, fg=C["muted"],
-                     font=("TkDefaultFont", 7)).pack(side=tk.LEFT)
+                     font=T.font_ui(7)).pack(side=tk.LEFT)
 
         title_fg = C["muted"] if accepted else C["text"]
         tk.Label(body, text=f.get("label", ""),
                  bg=card_bg, fg=title_fg,
-                 font=("TkDefaultFont", 10, "bold"),
+                 font=T.font_ui(10, "bold"),
                  anchor="w", wraplength=500,
                  justify=tk.LEFT).pack(fill=tk.X, pady=(5, 2))
 
@@ -1417,7 +1611,7 @@ class _FindingsPane:
         if why and not accepted:
             tk.Label(body, text=why,
                      bg=card_bg, fg=C["muted"],
-                     font=("TkDefaultFont", 9),
+                     font=T.font_ui(9),
                      anchor="w", wraplength=500,
                      justify=tk.LEFT).pack(fill=tk.X)
 
@@ -1567,9 +1761,9 @@ class ScanTab:
                                        state=tk.DISABLED)
         self._btn_fix_all.pack(fill=tk.X, pady=(0, 6))
 
-        self._btn_scan = ttk.Button(fix_f, text="▶  Scan now",
-                                    style="Accent.TButton",
-                                    command=self.start_scan)
+        self._btn_scan = RoundButton(fix_f, text="▶  Scan now",
+                                     bg=C["accent"], fg="#060a0f",
+                                     command=self.start_scan)
         self._btn_scan.pack(fill=tk.X)
 
         # Score label + gauge (top of left panel)
@@ -1661,7 +1855,6 @@ class ScanTab:
             self._confirm_and_fix([finding])
 
     def _confirm_and_fix(self, findings):
-        n_cmd = sum(len(f.get("fix_cmds", [])) for f in findings)
         if not _is_root() and not _elevation_available():
             _show_fix_denied_dialog(self.app.root, findings)
             return
@@ -1676,16 +1869,8 @@ class ScanTab:
             ):
                 return
 
-        sudo_note = (
-            "" if _is_root()
-            else "\n\nYou will be asked for your password once for all fixes."
-        )
-        noun = "issue" if len(findings) == 1 else "issues"
-        if not messagebox.askyesno(
-            "Apply fixes",
-            f"Fix {len(findings)} {noun} ({n_cmd} command(s))?{sudo_note}",
-            parent=self.frame,
-        ):
+        # Show the real commands + reversibility status before anything runs.
+        if not _confirm_fix_dialog(self.frame, findings):
             return
 
         if self._tracker:
@@ -2019,11 +2204,11 @@ class OverviewTab:
 
         fix_row = tk.Frame(outer, bg=C["bg"])
         fix_row.pack(pady=(18, 0), anchor="w")
-        self._btn_fix = ttk.Button(fix_row,
-                                   text="Fix recommended  (0 issues)",
-                                   style="Dim.TButton",
-                                   state=tk.DISABLED,
-                                   command=self._fix_recommended)
+        self._btn_fix = RoundButton(fix_row,
+                                    text="Fix recommended  (0 issues)",
+                                    bg=C["ok"], fg="#060a0f",
+                                    state=tk.DISABLED,
+                                    command=self._fix_recommended)
         self._btn_fix.pack(side=tk.LEFT)
 
     def _make_column(self, parent, title, side, padx):
@@ -2155,15 +2340,8 @@ class OverviewTab:
             ):
                 return
 
-        n_cmd = sum(len(f.get("fix_cmds", [])) for f in all_fixable)
-        sudo_note = ("" if _is_root()
-                     else "\n\nYou will be asked for your password once for all fixes.")
-        noun = "issue" if len(all_fixable) == 1 else "issues"
-        if not messagebox.askyesno(
-            "Apply fixes",
-            f"Fix {len(all_fixable)} {noun} ({n_cmd} command(s))?{sudo_note}",
-            parent=self.frame,
-        ):
+        # Show the real commands + reversibility status before anything runs.
+        if not _confirm_fix_dialog(self.frame, all_fixable):
             return
 
         if not self._app._tracker.before_fix("Overview"):
@@ -3416,8 +3594,8 @@ class App:
                    command=self._diff).pack(side=tk.LEFT)
         tk.Frame(br, bg=C["border"], width=1).pack(
             side=tk.LEFT, fill=tk.Y, pady=2, padx=6)
-        self._btn_revert = ttk.Button(br, text="↩  Revert Session",
-                                       style="Revert.TButton",
+        self._btn_revert = RoundButton(br, text="↩  Revert Session",
+                                       bg="#e3733a", fg="#1a0e06",
                                        state=tk.DISABLED,
                                        command=self._revert_session)
         self._btn_revert.pack(side=tk.LEFT, padx=(6, 0))
