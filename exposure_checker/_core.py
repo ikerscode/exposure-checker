@@ -23,7 +23,7 @@ except ImportError:
     _CRYPTO_OK = False
 
 
-__version__ = "1.1.4"
+__version__ = "1.1.5"
 
 _OS = platform.system()  # "Linux" | "Darwin" | "Windows"
 

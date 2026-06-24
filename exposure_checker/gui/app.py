@@ -186,7 +186,7 @@ def _configure_style(root):
 
     s.configure("TButton", background=inp, foreground=text,
                  bordercolor=border, padding=(12, 6), relief="flat",
-                 font=("TkDefaultFont", 9))
+                 font=T.font_ui(9))
     s.map("TButton",
           background=[("active", "#2d333b"), ("pressed", border)],
           relief=[("pressed", "flat"), ("active", "flat")])
@@ -201,7 +201,7 @@ def _configure_style(root):
     ])
 
     s.configure("Accent.TButton", background=accent, foreground="#060a0f",
-                 bordercolor=accent, font=("TkDefaultFont", 10, "bold"),
+                 bordercolor=accent, font=T.font_ui(10, "bold"),
                  padding=(20, 8))
     s.map("Accent.TButton",
           background=[("active", "#0099b8"), ("pressed", "#0077a8")],
@@ -209,7 +209,7 @@ def _configure_style(root):
 
     s.configure("Fix.TButton", background="#1e3a28", foreground="#3fb950",
                  bordercolor="#2ea043", padding=(14, 6),
-                 font=("TkDefaultFont", 9, "bold"))
+                 font=T.font_ui(9, "bold"))
     s.map("Fix.TButton",
           background=[("active", "#2a4d36"), ("pressed", "#1a3020"),
                       ("disabled", "#111a14")],
@@ -224,7 +224,7 @@ def _configure_style(root):
 
     s.configure("Revert.TButton", background="#2d1a10", foreground="#e3733a",
                  bordercolor="#6a3820", padding=(14, 6),
-                 font=("TkDefaultFont", 9, "bold"))
+                 font=T.font_ui(9, "bold"))
     s.map("Revert.TButton",
           background=[("active", "#3d2518"), ("disabled", "#1a1008")],
           foreground=[("disabled", "#4a2818")],
@@ -233,7 +233,7 @@ def _configure_style(root):
     s.configure("Treeview", background=panel, foreground=text,
                  fieldbackground=panel, bordercolor=border, rowheight=30)
     s.configure("Treeview.Heading", background=C["input"], foreground=muted,
-                 bordercolor=border, font=("TkDefaultFont", 9, "bold"),
+                 bordercolor=border, font=T.font_ui(9, "bold"),
                  padding=(8, 8))
     s.map("Treeview",
           background=[("selected", "#1f3a5c")],
@@ -255,7 +255,7 @@ def _configure_style(root):
 
     s.configure("TNotebook", background=bg, tabmargins=(0, 4, 0, 0))
     s.configure("TNotebook.Tab", background=panel, foreground=muted,
-                 padding=(14, 9), font=("TkDefaultFont", 10, "bold"))
+                 padding=(14, 9), font=T.font_ui(10, "bold"))
     s.map("TNotebook.Tab",
           background=[("selected", bg)],
           foreground=[("selected", text)])
@@ -391,7 +391,7 @@ class CenterStage(tk.Canvas):
 
         if self._sub:
             self.create_text(cx, cy + r + 16, text=self._sub, fill=C["muted"],
-                             font=("TkFixedFont", 8), anchor="center")
+                             font=T.font_mono(8), anchor="center")
 
     def _draw_score(self):
         self.delete("all")
@@ -459,12 +459,12 @@ class _SparklineWidget(tk.Canvas):
                 self.create_text(
                     self._W // 2, self._H // 2,
                     text=f"{data[-1]['score']}/100",
-                    fill=C["muted"], font=("TkDefaultFont", 8))
+                    fill=C["muted"], font=T.font_ui(8))
             else:
                 self.create_text(
                     self._W // 2, self._H // 2,
                     text="No history yet",
-                    fill=C["INFO"], font=("TkDefaultFont", 8))
+                    fill=C["INFO"], font=T.font_ui(8))
             return
 
         scores  = [d["score"] for d in data]
@@ -506,7 +506,7 @@ class _SparklineWidget(tk.Canvas):
         lx, ly = pts[-1]
         lbl = f"{scores[-1]}"
         self.create_text(lx - 3, ly - 7, text=lbl,
-                         fill=C["text"], font=("TkDefaultFont", 7),
+                         fill=C["text"], font=T.font_ui(7),
                          anchor="s")
 
 
@@ -530,10 +530,10 @@ class _AcceptRiskDialog(tk.Toplevel):
         pad = dict(padx=18, pady=6)
 
         tk.Label(self, text="Finding", bg=C["panel"], fg=C["muted"],
-                 font=("TkDefaultFont", 8, "bold"), anchor="w").pack(
+                 font=T.font_ui(8, "bold"), anchor="w").pack(
             fill=tk.X, padx=18, pady=(14, 0))
         tk.Label(self, text=label, bg=C["panel"], fg=C["text"],
-                 font=("TkDefaultFont", 10, "bold"),
+                 font=T.font_ui(10, "bold"),
                  wraplength=340, justify=tk.LEFT, anchor="w").pack(
             fill=tk.X, **pad)
 
@@ -548,7 +548,7 @@ class _AcceptRiskDialog(tk.Toplevel):
             tk.Label(self,
                      text=f"Accepted on {when}{note_sfx}",
                      bg=C["panel"], fg=C["ok"],
-                     font=("TkDefaultFont", 9)).pack(**pad)
+                     font=T.font_ui(9)).pack(**pad)
             ttk.Button(self, text="Remove acceptance",
                        command=self._remove).pack(padx=18, pady=(0, 14), anchor="e")
         else:
@@ -556,10 +556,10 @@ class _AcceptRiskDialog(tk.Toplevel):
                      text="Mark this finding as an accepted risk.\n"
                           "It will still appear but won't count toward the score.",
                      bg=C["panel"], fg=C["muted"],
-                     font=("TkDefaultFont", 9),
+                     font=T.font_ui(9),
                      justify=tk.LEFT).pack(**pad)
             tk.Label(self, text="Note (optional)", bg=C["panel"], fg=C["muted"],
-                     font=("TkDefaultFont", 8, "bold"), anchor="w").pack(
+                     font=T.font_ui(8, "bold"), anchor="w").pack(
                 fill=tk.X, padx=18)
             self._note_var = tk.StringVar()
             ttk.Entry(self, textvariable=self._note_var, width=42).pack(
@@ -617,12 +617,12 @@ class _ScheduleDialog(tk.Toplevel):
 
         tk.Label(self, text="Scheduled scans",
                  bg=C["panel"], fg=C["text"],
-                 font=("TkDefaultFont", 13, "bold")).pack(padx=20, pady=(16, 4), anchor="w")
+                 font=T.font_ui(13, "bold")).pack(padx=20, pady=(16, 4), anchor="w")
         tk.Label(self,
                  text="Runs silently in the background and sends a\n"
                       "desktop notification if new issues are found.",
                  bg=C["panel"], fg=C["muted"],
-                 font=("TkDefaultFont", 9), justify=tk.LEFT).pack(padx=20, anchor="w")
+                 font=T.font_ui(9), justify=tk.LEFT).pack(padx=20, anchor="w")
 
         tk.Frame(self, bg=C["border"], height=1).pack(fill=tk.X, padx=20, pady=10)
 
@@ -634,17 +634,17 @@ class _ScheduleDialog(tk.Toplevel):
         time_f = tk.Frame(self, bg=C["panel"])
         time_f.pack(fill=tk.X, padx=20, pady=(4, 0))
         tk.Label(time_f, text="Daily at", bg=C["panel"], fg=C["muted"],
-                 font=("TkDefaultFont", 9)).pack(side=tk.LEFT)
+                 font=T.font_ui(9)).pack(side=tk.LEFT)
         ttk.Spinbox(time_f, from_=0, to=23, width=3, format="%02.0f",
                     textvariable=self._hour_var).pack(side=tk.LEFT, padx=(8, 2))
         tk.Label(time_f, text=":", bg=C["panel"], fg=C["muted"],
-                 font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT)
+                 font=T.font_ui(9, "bold")).pack(side=tk.LEFT)
         ttk.Spinbox(time_f, from_=0, to=59, width=3, format="%02.0f",
                     textvariable=self._min_var).pack(side=tk.LEFT, padx=(2, 0))
 
         tk.Label(self, text="Tabs to scan",
                  bg=C["panel"], fg=C["muted"],
-                 font=("TkDefaultFont", 8, "bold")).pack(padx=20, pady=(12, 2), anchor="w")
+                 font=T.font_ui(8, "bold")).pack(padx=20, pady=(12, 2), anchor="w")
         for key, label in (("security", "Security"), ("antivirus", "Antivirus"),
                             ("cleaner", "Cleaner")):
             ttk.Checkbutton(self, text=label,
@@ -655,7 +655,7 @@ class _ScheduleDialog(tk.Toplevel):
         status_txt = f"Active: {cron_jobs[0]}" if cron_jobs else "Not scheduled"
         tk.Label(self, text=status_txt,
                  bg=C["panel"], fg=C["muted"],
-                 font=("TkDefaultFont", 7),
+                 font=T.font_ui(7),
                  wraplength=340).pack(padx=20, pady=(8, 0), anchor="w")
 
         tk.Frame(self, bg=C["border"], height=1).pack(fill=tk.X, padx=20, pady=12)
@@ -706,14 +706,14 @@ class _SevRow(tk.Frame):
         dot.create_oval(2, 2, 8, 8, fill=C[severity], outline="")
         dot.pack(side=tk.LEFT, padx=(0, 5))
         tk.Label(self, text=severity, bg=C["panel"], fg=C["muted"],
-                 font=("TkDefaultFont", 9), width=8, anchor="w").pack(side=tk.LEFT)
+                 font=T.font_ui(9), width=8, anchor="w").pack(side=tk.LEFT)
         self._bar = tk.Canvas(self, width=self._BAR_W, height=5,
                               bg=C["input"], highlightthickness=0)
         self._bar.pack(side=tk.LEFT, padx=(2, 4))
         self._fill = self._bar.create_rectangle(0, 0, 0, 5,
                                                 fill=C[severity], outline="")
         self._lbl = tk.Label(self, text="0", bg=C["panel"], fg=C["muted"],
-                             font=("TkDefaultFont", 9, "bold"), width=3,
+                             font=T.font_ui(9, "bold"), width=3,
                              anchor="e")
         self._lbl.pack(side=tk.LEFT)
 
@@ -1305,10 +1305,10 @@ class _FindingsPane:
                         beak=C["input"], eye=C["border"])
         tk.Label(f, text="Nothing found yet",
                  bg=C["bg"], fg=C["muted"],
-                 font=("TkDefaultFont", 14, "bold")).pack()
+                 font=T.font_ui(14, "bold")).pack()
         tk.Label(f, text="Press Scan now to analyse this machine",
                  bg=C["bg"], fg=C["INFO"],
-                 font=("TkDefaultFont", 10)).pack(pady=(6, 0))
+                 font=T.font_ui(10)).pack(pady=(6, 0))
 
     def _set_empty(self, visible: bool):
         state_cards = "hidden" if visible else "normal"
@@ -1384,7 +1384,7 @@ class _FindingsPane:
         hdr.pack(fill=tk.X)
         lbl_txt = f"▶  Show {n} informational item{'s' if n != 1 else ''}"
         self._info_btn = tk.Label(hdr, text=lbl_txt, bg=C["bg"], fg=C["muted"],
-                                  font=("TkDefaultFont", 9), cursor="hand2")
+                                  font=T.font_ui(9), cursor="hand2")
         self._info_btn.pack(side=tk.LEFT)
         tk.Frame(hdr, bg=C["border"], height=1).pack(
             side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0), pady=6)
@@ -1769,14 +1769,14 @@ class ScanTab:
         # Score label + gauge (top of left panel)
         tk.Label(left, text=self._score_label,
                  bg=C["panel"], fg=C["muted"],
-                 font=("TkDefaultFont", 8, "bold")).pack(pady=(10, 4))
+                 font=T.font_ui(8, "bold")).pack(pady=(10, 4))
 
         self._stage = CenterStage(left, size=174)
         self._stage.pack(padx=12)
 
         self._coaching_lbl = tk.Label(left, text="",
                                        bg=C["panel"], fg=C["accent"],
-                                       font=("TkDefaultFont", 8),
+                                       font=T.font_ui(8),
                                        wraplength=210, justify=tk.CENTER)
         self._coaching_lbl.pack(pady=(4, 0))
 
@@ -1801,7 +1801,7 @@ class ScanTab:
         comp_f = tk.Frame(left, bg=C["panel"])
         comp_f.pack(fill=tk.X, padx=10, pady=(0, 6))
         tk.Label(comp_f, text="Compliance", bg=C["panel"], fg=C["muted"],
-                 font=("TkDefaultFont", 7, "bold")).pack(anchor="w")
+                 font=T.font_ui(7, "bold")).pack(anchor="w")
         self._compliance_var = tk.StringVar(value="General")
         comp_cb = ttk.Combobox(comp_f, textvariable=self._compliance_var,
                                 values=ec.COMPLIANCE_PROFILES,
@@ -1809,7 +1809,7 @@ class ScanTab:
         comp_cb.pack(fill=tk.X, pady=(2, 0))
         self._compliance_lbl = tk.Label(comp_f, text="",
                                          bg=C["panel"], fg=C["accent"],
-                                         font=("TkDefaultFont", 7),
+                                         font=T.font_ui(7),
                                          wraplength=200)
         self._compliance_lbl.pack(anchor="w", pady=(2, 0))
 
@@ -2189,11 +2189,11 @@ class OverviewTab:
         hdr.pack(fill=tk.X, pady=(0, 14))
         tk.Label(hdr, text="System Overview",
                  bg=C["bg"], fg=C["text"],
-                 font=("TkDefaultFont", 14, "bold")).pack(side=tk.LEFT)
+                 font=T.font_ui(14, "bold")).pack(side=tk.LEFT)
         self._hint = tk.Label(hdr,
                               text="Run a scan on any tab to see results here.",
                               bg=C["bg"], fg=C["muted"],
-                              font=("TkDefaultFont", 9))
+                              font=T.font_ui(9))
         self._hint.pack(side=tk.RIGHT)
 
         cols = tk.Frame(outer, bg=C["bg"])
@@ -2217,7 +2217,7 @@ class OverviewTab:
         col.pack(side=side, fill=tk.BOTH, expand=True, padx=padx)
         tk.Label(col, text=title.upper(),
                  bg=C["panel"], fg=C["muted"],
-                 font=("TkDefaultFont", 9, "bold"),
+                 font=T.font_ui(9, "bold"),
                  padx=14, pady=10).pack(anchor="w")
         tk.Frame(col, bg=C["border"], height=1).pack(fill=tk.X, padx=12)
         body = tk.Frame(col, bg=C["panel"])
@@ -2272,7 +2272,7 @@ class OverviewTab:
         row.pack(fill=tk.X, pady=3)
 
         tk.Label(row, text=name, bg=C["panel"], fg=C["text"],
-                 font=("TkDefaultFont", 9), width=13, anchor="w").pack(side=tk.LEFT)
+                 font=T.font_ui(9), width=13, anchor="w").pack(side=tk.LEFT)
 
         # CRITICAL / HIGH count — recommended fixes
         if ch > 0:
@@ -2284,7 +2284,7 @@ class OverviewTab:
             ch_txt = "0 recommended"
             ch_cur = ""
         ch_lbl = tk.Label(row, text=ch_txt, bg=C["panel"], fg=ch_col,
-                          font=("TkDefaultFont", 8, "bold" if ch > 0 else "normal"),
+                          font=T.font_ui(8, "bold" if ch > 0 else "normal"),
                           padx=6, pady=3, cursor=ch_cur)
         ch_lbl.pack(side=tk.LEFT, padx=(4, 2))
         if ch > 0:
@@ -2302,7 +2302,7 @@ class OverviewTab:
             mr_txt = "0 to review"
             mr_cur = ""
         mr_lbl = tk.Label(row, text=mr_txt, bg=C["panel"], fg=mr_col,
-                          font=("TkDefaultFont", 8),
+                          font=T.font_ui(8),
                           padx=6, pady=3, cursor=mr_cur)
         mr_lbl.pack(side=tk.LEFT, padx=2)
         if mr > 0:
@@ -2424,12 +2424,12 @@ class SnapshotsTab:
         ctrl = tk.Frame(outer, bg=C["bg"])
         ctrl.pack(fill=tk.X, pady=(0, 10))
         tk.Label(ctrl, text="SYSTEM SNAPSHOTS", bg=C["bg"], fg=C["muted"],
-                 font=("TkDefaultFont", 8, "bold")).pack(side=tk.LEFT)
+                 font=T.font_ui(8, "bold")).pack(side=tk.LEFT)
         tk.Label(ctrl,
                  text="Save a point-in-time backup of system config. "
                       "Restore any snapshot to roll back changes.",
                  bg=C["bg"], fg=C["INFO"],
-                 font=("TkDefaultFont", 8)).pack(side=tk.LEFT, padx=(12, 0))
+                 font=T.font_ui(8)).pack(side=tk.LEFT, padx=(12, 0))
 
         # Buttons
         btn_f = tk.Frame(outer, bg=C["bg"])
@@ -2606,11 +2606,11 @@ class BenchmarkTab:
         ctrl.pack(fill=tk.X)
         self._status_lbl = tk.Label(ctrl, text="Press  ▶ RUN  to start  (~12 s)",
                                     bg=C["panel"], fg=C["muted"],
-                                    font=("TkDefaultFont", 9))
+                                    font=T.font_ui(9))
         self._status_lbl.pack(side=tk.LEFT, padx=12, pady=8)
         self._run_btn = tk.Button(ctrl, text="▶  RUN BENCHMARK",
                                   bg=C["accent"], fg=C["bg"],
-                                  font=("TkDefaultFont", 10, "bold"),
+                                  font=T.font_ui(10, "bold"),
                                   relief=tk.FLAT, padx=14, pady=5,
                                   cursor="hand2", command=self._start)
         self._run_btn.pack(side=tk.RIGHT, padx=12, pady=6)
@@ -2637,9 +2637,9 @@ class BenchmarkTab:
             card.grid(row=row, column=col, padx=4, pady=3, sticky="ew")
             grid.grid_columnconfigure(col, weight=1)
             tk.Label(card, text=label, bg=C["panel"], fg=C["text"],
-                     font=("TkDefaultFont", 9, "bold")).pack(anchor="w", padx=8, pady=(5,0))
+                     font=T.font_ui(9, "bold")).pack(anchor="w", padx=8, pady=(5,0))
             tk.Label(card, text=desc, bg=C["panel"], fg=C["muted"],
-                     font=("TkDefaultFont", 7)).pack(anchor="w", padx=8)
+                     font=T.font_ui(7)).pack(anchor="w", padx=8)
             vf = tk.Frame(card, bg=C["panel"])
             vf.pack(fill=tk.X, padx=8, pady=(1,6))
             val_v  = tk.StringVar(value="—")
@@ -2647,7 +2647,7 @@ class BenchmarkTab:
             tk.Label(vf, textvariable=val_v, bg=C["panel"], fg=C["accent"],
                      font=("TkFixedFont", 11, "bold")).pack(side=tk.LEFT)
             tl = tk.Label(vf, textvariable=tier_v, bg=C["panel"],
-                          font=("TkDefaultFont", 11, "bold"))
+                          font=T.font_ui(11, "bold"))
             tl.pack(side=tk.RIGHT)
             self._result_vars[key] = (val_v, tier_v, tl)
 
@@ -2655,14 +2655,14 @@ class BenchmarkTab:
                               highlightthickness=1, highlightbackground=C["border"])
         total_card.grid(row=3, column=0, columnspan=2, padx=4, pady=3, sticky="ew")
         self._grade_lbl  = tk.Label(total_card, text="—", bg=C["panel"],
-                                    fg=C["muted"], font=("TkDefaultFont", 30, "bold"))
+                                    fg=C["muted"], font=T.font_ui(30, "bold"))
         self._grade_lbl.pack(side=tk.LEFT, padx=14, pady=6)
         sf = tk.Frame(total_card, bg=C["panel"])
         sf.pack(side=tk.LEFT, pady=6)
         tk.Label(sf, text="OVERALL", bg=C["panel"], fg=C["muted"],
-                 font=("TkDefaultFont", 7)).pack(anchor="w")
+                 font=T.font_ui(7)).pack(anchor="w")
         self._score_lbl = tk.Label(sf, text="—", bg=C["panel"], fg=C["text"],
-                                   font=("TkDefaultFont", 11, "bold"))
+                                   font=T.font_ui(11, "bold"))
         self._score_lbl.pack(anchor="w")
 
     def _tier(self, score):
@@ -2936,9 +2936,9 @@ class BenchmarkTab:
                           fill=C["accent"], font=("TkFixedFont", 9))
         elif not self._results:
             c.create_text(W//2, H//2-14, text="GULLWING BENCHMARK",
-                          fill=C["accent"], font=("TkDefaultFont", 17, "bold"))
+                          fill=C["accent"], font=T.font_ui(17, "bold"))
             c.create_text(W//2, H//2+12, text="Press  ▶ RUN BENCHMARK  to begin",
-                          fill=C["muted"], font=("TkDefaultFont", 10))
+                          fill=C["muted"], font=T.font_ui(10))
 
 
 # ── Overclock Tab ──────────────────────────────────────────────────────────────
@@ -2975,7 +2975,7 @@ class OverclockTab:
         banner.pack(fill=tk.X, padx=0, pady=0)
         tk.Label(banner, text=self._RISK,
                  bg="#3a0808", fg="#ff9090",
-                 font=("TkDefaultFont", 8),
+                 font=T.font_ui(8),
                  justify=tk.LEFT).pack(anchor="w", padx=12, pady=8)
 
         # Main two-column layout
@@ -2990,10 +2990,10 @@ class OverclockTab:
         hdr_l.pack(fill=tk.X, pady=(0,4))
         tk.Label(hdr_l, text="  LIVE MONITOR",
                  bg=C["panel"], fg=C["accent"],
-                 font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT, pady=6)
+                 font=T.font_ui(9, "bold")).pack(side=tk.LEFT, pady=6)
         self._refresh_btn = tk.Button(hdr_l, text="⟳ Refresh",
                                       bg=C["panel"], fg=C["muted"],
-                                      font=("TkDefaultFont", 8),
+                                      font=T.font_ui(8),
                                       relief=tk.FLAT, cursor="hand2",
                                       command=self._poll)
         self._refresh_btn.pack(side=tk.RIGHT, padx=8)
@@ -3019,7 +3019,7 @@ class OverclockTab:
             row.pack(fill=tk.X, pady=2)
 
             name_lbl = tk.Label(row, text=label, bg=C["panel"], fg=C["muted"],
-                                 font=("TkDefaultFont", 8), width=16, anchor="w")
+                                 font=T.font_ui(8), width=16, anchor="w")
             name_lbl.pack(side=tk.LEFT, padx=(8,0), pady=5)
 
             bar_frame = tk.Frame(row, bg=C["bg"], height=14)
@@ -3042,7 +3042,7 @@ class OverclockTab:
 
         tk.Label(right, text="OC ADVISORY",
                  bg=C["bg"], fg=C["accent"],
-                 font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=(0,4))
+                 font=T.font_ui(9, "bold")).pack(anchor="w", pady=(0,4))
 
         adv_outer = tk.Frame(right, bg=C["bg"],
                              highlightthickness=1, highlightbackground=C["border"])
@@ -3066,7 +3066,7 @@ class OverclockTab:
         self._adv_status = tk.Label(self._adv_inner,
                                     text="Click  ⟳ Refresh  to load advisory…",
                                     bg=C["bg"], fg=C["muted"],
-                                    font=("TkDefaultFont", 8),
+                                    font=T.font_ui(8),
                                     wraplength=220, justify=tk.LEFT)
         self._adv_status.pack(anchor="w", padx=8, pady=8)
 
@@ -3330,7 +3330,7 @@ class OverclockTab:
             tk.Label(self._adv_inner,
                      text="No overclocking advisories for this system.",
                      bg=C["bg"], fg=C["ok"],
-                     font=("TkDefaultFont", 8),
+                     font=T.font_ui(8),
                      wraplength=220, justify=tk.LEFT).pack(anchor="w", padx=8, pady=8)
             return
 
@@ -3354,18 +3354,18 @@ class OverclockTab:
             hf = tk.Frame(card, bg=C["panel"])
             hf.pack(fill=tk.X, padx=6, pady=(5,0))
             tk.Label(hf, text=sev, bg=C["panel"], fg=color,
-                     font=("TkDefaultFont", 7, "bold")).pack(side=tk.LEFT)
+                     font=T.font_ui(7, "bold")).pack(side=tk.LEFT)
             tk.Label(hf, text=label, bg=C["panel"], fg=C["text"],
-                     font=("TkDefaultFont", 8, "bold"),
+                     font=T.font_ui(8, "bold"),
                      wraplength=190, justify=tk.LEFT).pack(anchor="w", padx=(4,0))
 
             if why:
                 tk.Label(card, text=why, bg=C["panel"], fg=C["muted"],
-                         font=("TkDefaultFont", 7),
+                         font=T.font_ui(7),
                          wraplength=210, justify=tk.LEFT).pack(anchor="w", padx=6, pady=(2,0))
             if fix:
                 tk.Label(card, text=fix, bg=C["panel"], fg=C["accent"],
-                         font=("TkDefaultFont", 7),
+                         font=T.font_ui(7),
                          wraplength=210, justify=tk.LEFT).pack(anchor="w", padx=6, pady=(1,4))
             else:
                 card.pack_configure(pady=(3,3))
@@ -3409,11 +3409,11 @@ class App:
         pill = tk.Frame(hdr, bg=C["pill"], highlightthickness=1,
                         highlightbackground=C["border"])
         tk.Label(pill, text=f"v{ec.__version__}", bg=C["pill"], fg=C["muted"],
-                 font=("TkDefaultFont", 8), padx=6, pady=2).pack(side=tk.LEFT)
+                 font=T.font_ui(8), padx=6, pady=2).pack(side=tk.LEFT)
         tk.Label(pill, text="•", bg=C["pill"], fg=C["border"],
-                 font=("TkDefaultFont", 8)).pack(side=tk.LEFT)
+                 font=T.font_ui(8)).pack(side=tk.LEFT)
         tk.Label(pill, text=priv, bg=C["pill"], fg=priv_fg,
-                 font=("TkDefaultFont", 8, "bold"), padx=6, pady=2).pack(side=tk.LEFT)
+                 font=T.font_ui(8, "bold"), padx=6, pady=2).pack(side=tk.LEFT)
         pill.pack(side=tk.RIGHT, padx=14)
 
         # Left: icon mark + title
@@ -3450,13 +3450,13 @@ class App:
         title_row.pack(anchor="w")
         tk.Label(title_row, text="GULLWING",
                  bg=C["bg"], fg=C["text"],
-                 font=("TkDefaultFont", 13, "bold")).pack(side=tk.LEFT)
+                 font=T.font_ui(13, "bold")).pack(side=tk.LEFT)
         tk.Label(title_row, text=f"  v{ec.__version__}",
                  bg=C["bg"], fg=C["accent"],
-                 font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT)
+                 font=T.font_ui(9, "bold")).pack(side=tk.LEFT)
         tk.Label(title_f, text="Tune it. Lock it. Send it.",
                  bg=C["bg"], fg=C["muted"],
-                 font=("TkDefaultFont", 7)).pack(anchor="w")
+                 font=T.font_ui(7)).pack(anchor="w")
 
         # Animated seagull mascot
         GULL_W, GULL_H = 100, 64
@@ -3486,10 +3486,10 @@ class App:
         ctrl.pack(fill=tk.X, padx=16, pady=(6, 4))
 
         tk.Label(ctrl, text="Target", bg=C["bg"], fg=C["muted"],
-                 font=("TkDefaultFont", 8, "bold")).grid(
+                 font=T.font_ui(8, "bold")).grid(
             row=0, column=0, sticky="w")
         tk.Label(ctrl, text="TLS host (optional)", bg=C["bg"], fg=C["muted"],
-                 font=("TkDefaultFont", 8, "bold")).grid(
+                 font=T.font_ui(8, "bold")).grid(
             row=0, column=2, sticky="w", padx=(16, 0))
 
         self._var_target = tk.StringVar(value="127.0.0.1")
@@ -3552,7 +3552,7 @@ class App:
         _draw_gull_icon(log_gull, 11, 8, flap=0.1, scale=0.32)
         tk.Label(log_hdr, text="Scan activity",
                  bg=C["bg"], fg=C["muted"],
-                 font=("TkDefaultFont", 8, "bold")).pack(side=tk.LEFT)
+                 font=T.font_ui(8, "bold")).pack(side=tk.LEFT)
 
         log_outer = tk.Frame(r, bg=C["log_bg"], bd=0,
                               highlightthickness=1,
@@ -3621,7 +3621,7 @@ class App:
             value="Ready — select a tab and press Scan")
         tk.Label(sb, textvariable=self._var_status,
                  bg=C["panel"], fg=C["muted"],
-                 font=("TkDefaultFont", 9), anchor=tk.W).pack(
+                 font=T.font_ui(9), anchor=tk.W).pack(
             side=tk.LEFT, fill=tk.X, expand=True, pady=7)
         self._progress = ttk.Progressbar(sb, mode="indeterminate", length=90)
         self._progress.pack(side=tk.RIGHT, padx=10, pady=7)
@@ -3629,7 +3629,7 @@ class App:
             side=tk.RIGHT, fill=tk.Y, pady=5)
         self._last_scan_lbl = tk.Label(
             sb, text="", bg=C["panel"], fg=C["muted"],
-            font=("TkDefaultFont", 8), padx=10)
+            font=T.font_ui(8), padx=10)
         self._last_scan_lbl.pack(side=tk.RIGHT, pady=7)
 
     # ── Nav rail ──────────────────────────────────────────────────────────────
@@ -3657,7 +3657,7 @@ class App:
                 self._nav_rail,
                 text=f"{icon}\n{label}",
                 bg=T.SURFACE, fg=T.TEXT_MUTED,
-                font=("TkDefaultFont", 8),
+                font=T.font_ui(8),
                 cursor="hand2", anchor="center",
                 justify=tk.CENTER,
                 pady=6,
@@ -3692,10 +3692,10 @@ class App:
         for frame_id, btn in self._nav_btns.items():
             if frame_id == selected:
                 btn.configure(fg=T.ACCENT, bg=T.BG,
-                               font=("TkDefaultFont", 8, "bold"))
+                               font=T.font_ui(8, "bold"))
             else:
                 btn.configure(fg=T.TEXT_MUTED, bg=T.SURFACE,
-                               font=("TkDefaultFont", 8))
+                               font=T.font_ui(8))
 
     # ── Seagull animation ─────────────────────────────────────────────────────
 
@@ -3824,7 +3824,7 @@ class App:
         menu = tk.Menu(self.root, tearoff=0,
                        bg=C["panel"], fg=C["text"],
                        activebackground=C["accent"], activeforeground=C["bg"],
-                       font=("TkDefaultFont", 9))
+                       font=T.font_ui(9))
         menu.add_command(label=f"Gull fact: {fact}", state="disabled",
                          foreground=C["muted"])
         menu.add_separator()
@@ -4794,14 +4794,14 @@ class VeniceSplash:
                 break
         # Drop shadow
         cnv.create_text(self.W // 2 + 1, ty + 1, text="GULLWING",
-                        fill="#020508", font=("TkDefaultFont", 22, "bold"),
+                        fill="#020508", font=T.font_ui(22, "bold"),
                         anchor="center", tags="title")
         cnv.create_text(self.W // 2, ty, text="GULLWING",
-                        fill="#e6edf3", font=("TkDefaultFont", 22, "bold"),
+                        fill="#e6edf3", font=T.font_ui(22, "bold"),
                         anchor="center", tags="title")
         cnv.create_text(self.W // 2, ty + 28,
                         text="Scan  ·  Optimize  ·  Protect  ·  Clean — on the machine you own",
-                        fill="#8fa0b4", font=("TkDefaultFont", 10),
+                        fill="#8fa0b4", font=T.font_ui(10),
                         anchor="center", tags="title")
         # Progress bar — wider, with a glow fill
         bar_w, bar_h = 280, 6
@@ -4821,7 +4821,7 @@ class VeniceSplash:
         pct = int(progress * 100)
         cnv.create_text(self.W // 2, ty + 62,
                         text=f"{stage}   {pct}%   v{ec.__version__}",
-                        fill="#5a6a7a", font=("TkDefaultFont", 8),
+                        fill="#5a6a7a", font=T.font_ui(8),
                         anchor="center", tags="title")
 
     # ── Animation loop ────────────────────────────────────────────────────────
@@ -4893,10 +4893,10 @@ def _first_run_wizard(root: tk.Tk, app) -> None:
 
     tk.Label(dlg, text="Welcome",
              bg=C["bg"], fg=C["accent"],
-             font=("TkDefaultFont", 18, "bold")).pack(pady=(28, 4))
+             font=T.font_ui(18, "bold")).pack(pady=(28, 4))
     tk.Label(dlg, text="Choose how to start your first scan:",
              bg=C["bg"], fg=C["text"],
-             font=("TkDefaultFont", 10)).pack(pady=(0, 22))
+             font=T.font_ui(10)).pack(pady=(0, 22))
 
     choice = [None]
 
@@ -4916,7 +4916,7 @@ def _first_run_wizard(root: tk.Tk, app) -> None:
 
     tk.Label(dlg, text="You can re-run any scan from its tab at any time.",
              bg=C["bg"], fg=C["muted"],
-             font=("TkDefaultFont", 8)).pack(pady=(20, 0))
+             font=T.font_ui(8)).pack(pady=(20, 0))
 
     root.wait_window(dlg)
 
