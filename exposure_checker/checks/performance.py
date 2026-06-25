@@ -98,7 +98,7 @@ def _check_startup_windows(reporter):
                     f"{name} launches at sign-in from {key}. "
                     f"{_startup_hint(name, val)} Command: {_truncate(val)}",
                     "Disable this startup entry if you do not need it before launching a game.",
-                    fix_cmds=[cmd],
+                    fix_cmds=[cmd], revertable=False,
                     source=key, command=val,
                 )
                 n += 1
@@ -134,7 +134,7 @@ def _check_startup_windows(reporter):
                 f"{entry.name} starts from the {label}. "
                 f"{_startup_hint(entry.name, entry.path)}",
                 "Move it out of the Startup folder if it is not needed at login.",
-                fix_cmds=[cmd],
+                fix_cmds=[cmd], revertable=False,
                 source=folder, command=entry.path,
             )
             n += 1
@@ -162,7 +162,7 @@ def _check_startup_windows(reporter):
                 "This non-Microsoft scheduled task runs at boot or login. "
                 f"{_startup_hint(name, path)}",
                 "Disable the task if it is a helper/updater you do not need while gaming.",
-                fix_cmds=[cmd],
+                fix_cmds=[cmd], revertable=False,
                 source="Task Scheduler",
             )
             n += 1
@@ -214,7 +214,7 @@ def _check_startup_macos(reporter):
                 f"{label} is a {scope} loaded at login or boot from {path}. "
                 f"{_startup_hint(label, path)}",
                 "Disable it if you do not need this helper running in the background.",
-                fix_cmds=[_mac_disable_launch_item_cmd(path, scope)],
+                fix_cmds=[_mac_disable_launch_item_cmd(path, scope)], revertable=False,
                 source=path,
             )
             n += 1
@@ -235,7 +235,7 @@ def _check_startup_macos(reporter):
                     "REVIEW", f"Login item: {name}",
                     f"{name} launches at login. {_startup_hint(name)}",
                     "Remove this login item if it is not needed before gaming.",
-                    fix_cmds=[f"osascript -e {_shell_quote(script)}"],
+                    fix_cmds=[f"osascript -e {_shell_quote(script)}"], revertable=False,
                     source="Login Items",
                 )
                 n += 1
@@ -335,7 +335,7 @@ def _check_startup_linux(reporter):
                 f"{_startup_hint(meta['name'], meta['exec'])} "
                 f"Command: {_truncate(meta['exec']) or '(not declared)'}",
                 "Disable this autostart entry if it is a helper/updater you do not need.",
-                fix_cmds=[cmd],
+                fix_cmds=[cmd], revertable=False,
                 source=path, command=meta["exec"],
             )
             n += 1
@@ -396,7 +396,7 @@ def _check_power_windows(reporter) -> int:
                 f"Active plan: {_truncate(out)}. Balanced/power-saver plans can add "
                 "CPU parking and latency spikes while gaming on AC power.",
                 "Switch to the built-in High performance plan before competitive gaming.",
-                fix_cmds=["powercfg /setactive SCHEME_MIN"],
+                fix_cmds=["powercfg /setactive SCHEME_MIN"], revertable=False,
             )
             n += 1
 
@@ -410,7 +410,7 @@ def _check_power_windows(reporter) -> int:
             fix_cmds=[
                 f"powercfg /setacvalueindex SCHEME_CURRENT {_WIN_USB_SUBGROUP} "
                 f"{_WIN_USB_SELECTIVE} 0; powercfg /setactive SCHEME_CURRENT"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -424,7 +424,7 @@ def _check_power_windows(reporter) -> int:
             fix_cmds=[
                 f"powercfg /setacvalueindex SCHEME_CURRENT {_WIN_PCIE_SUBGROUP} "
                 f"{_WIN_PCIE_ASPM} 0; powercfg /setactive SCHEME_CURRENT"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -441,7 +441,7 @@ def _check_power_windows(reporter) -> int:
             fix_cmds=[
                 f"powercfg /setacvalueindex SCHEME_CURRENT {_WIN_PROC_SUBGROUP} "
                 f"{_WIN_CORE_PARK_MIN} 100; powercfg /setactive SCHEME_CURRENT"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -468,7 +468,7 @@ def _check_power_windows(reporter) -> int:
             fix_cmds=[
                 "bcdedit /set {current} useplatformtick yes; "
                 "bcdedit /set {current} disabledynamictick yes"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -490,7 +490,7 @@ def _check_power_windows(reporter) -> int:
                 "Set-ItemProperty "
                 "'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\PriorityControl' "
                 "-Name Win32PrioritySeparation -Value 0x26 -Type DWord -Force"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -512,7 +512,7 @@ def _check_power_windows(reporter) -> int:
                 "Set-ItemProperty "
                 "'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power' "
                 "-Name HiberbootEnabled -Value 0 -Type DWord -Force"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -534,7 +534,7 @@ def _check_power_macos(reporter) -> int:
             "Low Power Mode intentionally reduces energy use, which can throttle "
             "CPU/GPU performance during games.",
             "Turn Low Power Mode off before gaming.",
-            fix_cmds=["pmset -a lowpowermode 0"],
+            fix_cmds=["pmset -a lowpowermode 0"], revertable=False,
         )
         n += 1
     return n
@@ -556,7 +556,7 @@ def _check_power_linux(reporter) -> int:
                     "The system power profile can cap boost behavior. "
                     "Performance mode is available on this machine.",
                     "Switch to the performance power profile before gaming.",
-                    fix_cmds=["powerprofilesctl set performance"],
+                    fix_cmds=["powerprofilesctl set performance"], revertable=False,
                 )
                 n += 1
         except (OSError, subprocess.TimeoutExpired):
@@ -586,7 +586,7 @@ def _check_power_linux(reporter) -> int:
                 fix_cmds=[
                     "for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; "
                     "do [ -w \"$f\" ] && echo performance > \"$f\"; done"
-                ],
+                ], revertable=False,
             )
             n += 1
     except Exception:
@@ -649,7 +649,7 @@ def _check_gpu_windows(reporter) -> int:
             fix_cmds=[
                 "New-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers' "
                 "-Name HwSchMode -Value 2 -PropertyType DWord -Force | Out-Null"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -673,7 +673,7 @@ def _check_gpu_windows(reporter) -> int:
                 "-Name AllowAutoGameMode -Value 1 -PropertyType DWord -Force | Out-Null; "
                 "New-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\GameBar' "
                 "-Name AutoGameModeEnabled -Value 1 -PropertyType DWord -Force | Out-Null"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -700,7 +700,7 @@ def _check_gpu_windows(reporter) -> int:
                 "New-Item -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\GameDVR' -Force | Out-Null; "
                 "New-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\GameDVR' "
                 "-Name AppCaptureEnabled -Value 0 -PropertyType DWord -Force | Out-Null"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -755,7 +755,7 @@ def _check_gpu_windows(reporter) -> int:
             fix_cmds=[
                 "Set-ItemProperty 'HKCU:\\Software\\Microsoft\\DirectX\\UserGpuPreferences' "
                 "-Name AllowTearing -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -776,7 +776,7 @@ def _check_gpu_windows(reporter) -> int:
             fix_cmds=[
                 "Set-ItemProperty 'HKCU:\\System\\GameConfigStore' "
                 "-Name GameDVR_FSEBehaviorMode -Value 0 -Type DWord -Force"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -799,7 +799,7 @@ def _check_gpu_windows(reporter) -> int:
                 "-Force | Out-Null; "
                 "Set-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\Dwm' "
                 "-Name OverlayTestMode -Value 5 -Type DWord -Force"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -823,7 +823,7 @@ def _check_gpu_windows(reporter) -> int:
                 "-Name MouseThreshold1 -Value 0 -Force; "
                 "Set-ItemProperty 'HKCU:\\Control Panel\\Mouse' "
                 "-Name MouseThreshold2 -Value 0 -Force"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -900,7 +900,7 @@ def _check_gpu_macos(reporter) -> int:
             "Dual-GPU Intel Macs can trade graphics performance for battery life. "
             "Discrete-only mode can improve game consistency while plugged in.",
             "Switch to discrete GPU mode before gaming.",
-            fix_cmds=["pmset -a gpuswitch 1"],
+            fix_cmds=["pmset -a gpuswitch 1"], revertable=False,
         )
         n += 1
     return n
@@ -924,7 +924,7 @@ def _check_gpu_linux(reporter) -> int:
                         "Persistence mode keeps the NVIDIA driver initialized, reducing "
                         "startup latency for GPU workloads and some launchers.",
                         "Enable NVIDIA persistence mode for this boot.",
-                        fix_cmds=["nvidia-smi -pm 1"],
+                        fix_cmds=["nvidia-smi -pm 1"], revertable=False,
                     )
                     n += 1
         except (OSError, subprocess.TimeoutExpired):
@@ -943,7 +943,7 @@ def _check_gpu_linux(reporter) -> int:
                     "REVIEW", "AMD GPU is pinned to low power",
                     f"{path} is set to 'low', which can cap GPU clocks.",
                     "Switch the AMD GPU performance level back to auto.",
-                    fix_cmds=[f"echo auto > {_shell_quote(path)}"],
+                    fix_cmds=[f"echo auto > {_shell_quote(path)}"], revertable=False,
                 )
                 n += 1
     except Exception:
@@ -962,7 +962,7 @@ def _check_gpu_linux(reporter) -> int:
                     f"DPM state '{state}' limits GPU clock speeds below the "
                     "performance state, which can reduce frame rates.",
                     f"Switch {card} to 'performance' DPM state.",
-                    fix_cmds=[f"echo performance > {_shell_quote(pp_path)}"],
+                    fix_cmds=[f"echo performance > {_shell_quote(pp_path)}"], revertable=False,
                 )
                 n += 1
                 break
@@ -1040,7 +1040,7 @@ def _check_protection_windows(reporter) -> int:
                 "MEDIUM", "Controlled Folder Access is off",
                 "Controlled Folder Access can block ransomware-style writes to protected folders.",
                 "Enable Controlled Folder Access. If a trusted game/mod tool is blocked, allow it explicitly.",
-                fix_cmds=["Set-MpPreference -EnableControlledFolderAccess Enabled"],
+                fix_cmds=["Set-MpPreference -EnableControlledFolderAccess Enabled"], revertable=False,
             )
             n += 1
         if _mp_value_disabled(prefs.get("PUAProtection", 0)):
@@ -1048,7 +1048,7 @@ def _check_protection_windows(reporter) -> int:
                 "MEDIUM", "Potentially unwanted app protection is off",
                 "PUA protection blocks common bundleware, miners, and browser hijackers.",
                 "Enable Microsoft Defender PUA protection.",
-                fix_cmds=["Set-MpPreference -PUAProtection Enabled"],
+                fix_cmds=["Set-MpPreference -PUAProtection Enabled"], revertable=False,
             )
             n += 1
         if _mp_value_disabled(prefs.get("EnableNetworkProtection", 0)):
@@ -1056,7 +1056,7 @@ def _check_protection_windows(reporter) -> int:
                 "REVIEW", "Defender network protection is off",
                 "Network protection can block known malicious domains and outbound callbacks.",
                 "Enable Defender network protection if it is supported on this edition.",
-                fix_cmds=["Set-MpPreference -EnableNetworkProtection Enabled"],
+                fix_cmds=["Set-MpPreference -EnableNetworkProtection Enabled"], revertable=False,
             )
             n += 1
         if prefs.get("DisableScriptScanning") is True:
@@ -1064,7 +1064,7 @@ def _check_protection_windows(reporter) -> int:
                 "HIGH", "Defender script scanning is disabled",
                 "Script scanning catches PowerShell, JavaScript, and VBScript malware before execution.",
                 "Re-enable script scanning.",
-                fix_cmds=["Set-MpPreference -DisableScriptScanning $false"],
+                fix_cmds=["Set-MpPreference -DisableScriptScanning $false"], revertable=False,
             )
             n += 1
         exclusions = []
@@ -1092,7 +1092,7 @@ def _check_protection_windows(reporter) -> int:
             "HIGH", "SMBv1 protocol is enabled",
             "SMBv1 is obsolete and historically wormable. It should be disabled on gaming PCs.",
             "Disable SMBv1. Reboot may be required.",
-            fix_cmds=["Disable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol -NoRestart"],
+            fix_cmds=["Disable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol -NoRestart"], revertable=False,
         )
         n += 1
 
@@ -1110,7 +1110,7 @@ def _check_protection_windows(reporter) -> int:
                 "Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server' "
                 "-Name fDenyTSConnections -Value 1; "
                 "Disable-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -1127,7 +1127,7 @@ def _check_protection_windows(reporter) -> int:
             fix_cmds=[
                 "Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Remote Assistance' "
                 "-Name fAllowToGetHelp -Value 0"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -1189,7 +1189,7 @@ def _check_protection_windows(reporter) -> int:
                 "'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\DeviceGuard\\Scenarios"
                 "\\HypervisorEnforcedCodeIntegrity' "
                 "-Name Enabled -Value 1 -Type DWord -Force"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -1213,7 +1213,7 @@ def _check_protection_windows(reporter) -> int:
                 "Set-ItemProperty "
                 "'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' "
                 "-Name EnableLUA -Value 1 -Type DWord -Force"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -1238,7 +1238,7 @@ def _check_protection_windows(reporter) -> int:
                 "Set-ItemProperty "
                 "'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer' "
                 "-Name NoDriveTypeAutoRun -Value 0xFF -Type DWord -Force"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -1253,7 +1253,7 @@ def _check_protection_windows(reporter) -> int:
             "Real-time protection is the primary defence against malware dropped by "
             "infected mods, cheat injectors, or drive-by download exploits in game browsers.",
             "Re-enable Real-Time Protection in Windows Security.",
-            fix_cmds=["Set-MpPreference -DisableRealtimeMonitoring $false"],
+            fix_cmds=["Set-MpPreference -DisableRealtimeMonitoring $false"], revertable=False,
         )
         n += 1
 
@@ -1268,7 +1268,7 @@ def _check_protection_windows(reporter) -> int:
             "The Guest account provides unauthenticated local access. "
             "It should be disabled on gaming and personal PCs.",
             "Disable the Guest account.",
-            fix_cmds=["Disable-LocalUser -Name 'Guest' -ErrorAction SilentlyContinue"],
+            fix_cmds=["Disable-LocalUser -Name 'Guest' -ErrorAction SilentlyContinue"], revertable=False,
         )
         n += 1
 
@@ -1301,7 +1301,7 @@ def _check_protection_windows(reporter) -> int:
             "Enable Force ASLR in Windows Security → App & browser control → Exploit protection.",
             fix_cmds=[
                 "Set-ProcessMitigation -System -Enable ForceRelocateImages"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -1333,7 +1333,7 @@ def _check_protection_macos(reporter) -> int:
                 "MEDIUM", "Firewall stealth mode is off",
                 "Stealth mode stops the Mac from responding to some unsolicited probes.",
                 "Enable firewall stealth mode.",
-                fix_cmds=[f"{_shell_quote(sff)} --setstealthmode on"],
+                fix_cmds=[f"{_shell_quote(sff)} --setstealthmode on"], revertable=False,
             )
             n += 1
     except (OSError, subprocess.TimeoutExpired):
@@ -1361,7 +1361,7 @@ def _check_protection_macos(reporter) -> int:
                 "CriticalUpdateInstall -bool true; "
                 "defaults write /Library/Preferences/com.apple.SoftwareUpdate "
                 "ConfigDataInstall -bool true"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -1379,7 +1379,7 @@ def _check_protection_macos(reporter) -> int:
                     sev, label,
                     "Remote access services increase the attack surface when they are not needed.",
                     "Disable this sharing service unless you intentionally use it.",
-                    fix_cmds=[fix_cmd],
+                    fix_cmds=[fix_cmd], revertable=False,
                 )
                 n += 1
         except (OSError, subprocess.TimeoutExpired):
@@ -1395,7 +1395,7 @@ def _check_protection_macos(reporter) -> int:
                 "Gatekeeper validates app signatures before launch. Disabling it allows "
                 "any unsigned code to run silently — a common vector for macOS malware.",
                 "Re-enable Gatekeeper.",
-                fix_cmds=["spctl --master-enable"],
+                fix_cmds=["spctl --master-enable"], revertable=False,
             )
             n += 1
     except (OSError, subprocess.TimeoutExpired):
@@ -1434,7 +1434,7 @@ def _check_protection_macos(reporter) -> int:
                 fix_cmds=[
                     "defaults write /Library/Preferences/com.apple.loginwindow "
                     "GuestEnabled -bool false"
-                ],
+                ], revertable=False,
             )
             n += 1
     except (OSError, subprocess.TimeoutExpired):
@@ -1473,7 +1473,7 @@ def _check_protection_macos(reporter) -> int:
                 "all apps. Disabling it exposes game servers, remote tools, and "
                 "system services to the local network.",
                 "Enable the firewall in System Settings → Network → Firewall.",
-                fix_cmds=[f"{_shell_quote(sff)} --setglobalstate on"],
+                fix_cmds=[f"{_shell_quote(sff)} --setglobalstate on"], revertable=False,
             )
             n += 1
     except (OSError, subprocess.TimeoutExpired):
@@ -1517,7 +1517,7 @@ def _check_protection_linux(reporter) -> int:
                     "MEDIUM", "SELinux is permissive",
                     "Permissive mode logs policy violations but does not block them.",
                     "Switch SELinux to enforcing after confirming policy health.",
-                    fix_cmds=["setenforce 1"],
+                    fix_cmds=["setenforce 1"], revertable=False,
                 )
                 n += 1
             elif mode == "Disabled":
@@ -1550,7 +1550,7 @@ def _check_protection_linux(reporter) -> int:
                     "'APT::Periodic::Update-Package-Lists \"1\";' "
                     "'APT::Periodic::Unattended-Upgrade \"1\";' "
                     "> /etc/apt/apt.conf.d/20auto-upgrades"
-                ],
+                ], revertable=False,
             )
             n += 1
     elif shutil.which("systemctl"):
@@ -1563,7 +1563,7 @@ def _check_protection_linux(reporter) -> int:
                     "REVIEW", "dnf-automatic timer is not enabled",
                     "Automatic security update checks reduce the window of exposure.",
                     "Enable dnf-automatic if it is installed and appropriate for this PC.",
-                    fix_cmds=["systemctl enable --now dnf-automatic.timer"],
+                    fix_cmds=["systemctl enable --now dnf-automatic.timer"], revertable=False,
                 )
                 n += 1
         except (OSError, subprocess.TimeoutExpired):
@@ -1659,7 +1659,7 @@ def _check_protection_linux(reporter) -> int:
                     "fail2ban blocks IPs showing brute-force patterns against SSH "
                     "and other services. Running it protects exposed ports.",
                     "Start and enable fail2ban.",
-                    fix_cmds=["systemctl enable --now fail2ban"],
+                    fix_cmds=["systemctl enable --now fail2ban"], revertable=False,
                 )
                 n += 1
         except (OSError, subprocess.TimeoutExpired):
@@ -1677,7 +1677,7 @@ def _check_protection_linux(reporter) -> int:
                     "auditd provides fine-grained auditing of system calls, file access, "
                     "and privilege escalation events — essential for incident response.",
                     "Enable auditd.",
-                    fix_cmds=["systemctl enable --now auditd"],
+                    fix_cmds=["systemctl enable --now auditd"], revertable=False,
                 )
                 n += 1
         except (OSError, subprocess.TimeoutExpired):
@@ -1758,7 +1758,7 @@ def _check_network_perf_windows(reporter) -> int:
                     " -Type DWord -Force -ErrorAction SilentlyContinue;"
                     " Set-ItemProperty $_.PSPath -Name TCPNoDelay -Value 1"
                     " -Type DWord -Force -ErrorAction SilentlyContinue }"
-                ],
+                ], revertable=False,
             )
             n += 1
 
@@ -1777,7 +1777,7 @@ def _check_network_perf_windows(reporter) -> int:
                 "RSS distributes packet processing across CPU cores, preventing a "
                 "single-core bottleneck during heavy gaming and streaming traffic.",
                 "Enable RSS on all physical adapters.",
-                fix_cmds=["Enable-NetAdapterRss -Name * -ErrorAction SilentlyContinue"],
+                fix_cmds=["Enable-NetAdapterRss -Name * -ErrorAction SilentlyContinue"], revertable=False,
             )
             n += 1
 
@@ -1804,7 +1804,7 @@ def _check_network_perf_windows(reporter) -> int:
                     " Set-NetAdapterAdvancedProperty -Name $_.Name"
                     " -RegistryKeyword 'EEE' -RegistryValue '0'"
                     " -ErrorAction SilentlyContinue }"
-                ],
+                ], revertable=False,
             )
             n += 1
 
@@ -1826,7 +1826,7 @@ def _check_network_perf_windows(reporter) -> int:
                 "Set-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT"
                 "\\CurrentVersion\\Multimedia\\SystemProfile' "
                 "-Name NetworkThrottlingIndex -Value 0xFFFFFFFF -Type DWord -Force"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -1851,7 +1851,7 @@ def _check_network_perf_linux(reporter) -> int:
                     "sysctl -w net.core.wmem_max=16777216; "
                     "sysctl -w net.ipv4.tcp_rmem='4096 87380 16777216'; "
                     "sysctl -w net.ipv4.tcp_wmem='4096 65536 16777216'"
-                ],
+                ], revertable=False,
             )
             n += 1
     except (OSError, ValueError):
@@ -1869,7 +1869,7 @@ def _check_network_perf_linux(reporter) -> int:
                     "Without irqbalance, all hardware interrupts (NIC, disk) land on "
                     "CPU0, which can saturate that core during heavy network I/O.",
                     "Start irqbalance to distribute interrupts across cores.",
-                    fix_cmds=["systemctl enable --now irqbalance"],
+                    fix_cmds=["systemctl enable --now irqbalance"], revertable=False,
                 )
                 n += 1
         except (OSError, subprocess.TimeoutExpired):
@@ -1936,7 +1936,7 @@ def _check_memory_windows(reporter) -> int:
                 "Set-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT"
                 "\\CurrentVersion\\Multimedia\\SystemProfile' "
                 "-Name SystemResponsiveness -Value 0 -Type DWord -Force"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -1966,7 +1966,7 @@ def _check_memory_windows(reporter) -> int:
                 "-Type String -Force; "
                 "Set-ItemProperty $p -Name 'SFIO Priority' -Value 'High' "
                 "-Type String -Force"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -1987,7 +1987,7 @@ def _check_memory_windows(reporter) -> int:
             fix_cmds=[
                 f"Set-ItemProperty {_ps_quote(vi_key)} "
                 "-Name MinAnimate -Value 0 -Force"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -2022,7 +2022,7 @@ def _check_memory_windows(reporter) -> int:
             fix_cmds=[
                 "Stop-Service SysMain -Force -ErrorAction SilentlyContinue; "
                 "Set-Service SysMain -StartupType Disabled"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -2040,7 +2040,7 @@ def _check_memory_windows(reporter) -> int:
             fix_cmds=[
                 "Stop-Service WSearch -Force -ErrorAction SilentlyContinue; "
                 "Set-Service WSearch -StartupType Disabled"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -2065,7 +2065,7 @@ def _check_memory_windows(reporter) -> int:
                 "'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion"
                 "\\DeliveryOptimization\\Config' "
                 "-Name DODownloadMode -Value 1 -Type DWord -Force"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -2118,7 +2118,7 @@ def _check_memory_windows(reporter) -> int:
                 "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VisualEffects' "
                 "-Name VisualFXSetting -Value 2 -Type DWord -Force; "
                 "Stop-Process -Name explorer -Force; Start-Process explorer"
-            ],
+            ], revertable=False,
         )
         n += 1
 
@@ -2147,7 +2147,7 @@ def _check_memory_windows(reporter) -> int:
                     "'C:\\Program Files (x86)\\Steam\\steamapps' -ErrorAction SilentlyContinue; "
                     "Add-MpPreference -ExclusionPath "
                     "'C:\\Program Files\\Steam\\steamapps' -ErrorAction SilentlyContinue"
-                ],
+                ], revertable=False,
             )
             n += 1
 
@@ -2168,7 +2168,7 @@ def _check_memory_linux(reporter) -> int:
                 "before RAM is full, causing multi-second micro-stutters when pages "
                 "are demanded back.",
                 "Lower swappiness to 10 for this session.",
-                fix_cmds=["sysctl -w vm.swappiness=10"],
+                fix_cmds=["sysctl -w vm.swappiness=10"], revertable=False,
             )
             n += 1
     except (OSError, ValueError):
@@ -2187,7 +2187,7 @@ def _check_memory_linux(reporter) -> int:
                 "Switch to madvise mode so only opt-in apps get huge pages.",
                 fix_cmds=[
                     "echo madvise > /sys/kernel/mm/transparent_hugepage/enabled"
-                ],
+                ], revertable=False,
             )
             n += 1
     except OSError:
@@ -2205,7 +2205,7 @@ def _check_memory_linux(reporter) -> int:
                 "this can freeze the frame for hundreds of milliseconds.",
                 "Lower dirty_ratio for smoother disk I/O.",
                 fix_cmds=["sysctl -w vm.dirty_ratio=5; "
-                          "sysctl -w vm.dirty_background_ratio=3"],
+                          "sysctl -w vm.dirty_background_ratio=3"], revertable=False,
             )
             n += 1
     except (OSError, ValueError):
@@ -2245,7 +2245,7 @@ def _check_memory_linux(reporter) -> int:
                     f"Switch {dev} to mq-deadline.",
                     fix_cmds=[
                         f"echo mq-deadline > /sys/block/{_shell_quote(dev)}/queue/scheduler"
-                    ],
+                    ], revertable=False,
                 )
                 n += 1
                 break
@@ -2294,7 +2294,7 @@ def _check_memory_linux(reporter) -> int:
                         "  max=$(cat $cpu/cpuinfo_max_freq 2>/dev/null) || continue; "
                         "  [ -w $cpu/scaling_min_freq ] && echo $max > $cpu/scaling_min_freq; "
                         "done"
-                    ],
+                    ], revertable=False,
                 )
                 n += 1
         except (OSError, ValueError):
@@ -2407,7 +2407,7 @@ def _check_memory_macos(reporter) -> int:
                 fix_cmds=[
                     "defaults write NSGlobalDomain NSAppSleepDisabled -bool YES; "
                     "killall Dock"
-                ],
+                ], revertable=False,
             )
             n += 1
     except (OSError, subprocess.TimeoutExpired):
@@ -2432,7 +2432,7 @@ def _check_memory_macos(reporter) -> int:
                     "defaults write /Library/Preferences/com.apple.Bluetooth "
                     "ControllerPowerState -int 0; "
                     "killall -HUP bluetoothd 2>/dev/null || true"
-                ],
+                ], revertable=False,
             )
             n += 1
     except (OSError, subprocess.TimeoutExpired):
@@ -2450,7 +2450,7 @@ def _check_memory_macos(reporter) -> int:
                 "A Time Machine backup in progress can saturate disk I/O and USB/Thunderbolt "
                 "bandwidth, causing frame drops and shader cache stutters.",
                 "Pause backups before gaming.",
-                fix_cmds=["tmutil stopbackup"],
+                fix_cmds=["tmutil stopbackup"], revertable=False,
             )
             n += 1
         # Also check if TM is enabled with no exclusions for game library

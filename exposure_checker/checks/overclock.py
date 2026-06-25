@@ -243,7 +243,7 @@ def _oc_cpu_linux(reporter) -> int:
                     "Re-enable: echo 0 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo\n"
                     "To persist across reboots add 'intel_pstate.no_turbo=0' to GRUB_CMDLINE_LINUX "
                     "in /etc/default/grub, then run update-grub.",
-                    fix_cmds=["echo 0 | tee /sys/devices/system/cpu/intel_pstate/no_turbo"],
+                    fix_cmds=["echo 0 | tee /sys/devices/system/cpu/intel_pstate/no_turbo"], revertable=False,
                 )
                 n += 1
             else:
@@ -266,7 +266,7 @@ def _oc_cpu_linux(reporter) -> int:
                         "prevents all cores from exceeding their base frequency."
                     ),
                     "Re-enable: echo 1 | sudo tee /sys/devices/system/cpu/cpufreq/boost",
-                    fix_cmds=["echo 1 | tee /sys/devices/system/cpu/cpufreq/boost"],
+                    fix_cmds=["echo 1 | tee /sys/devices/system/cpu/cpufreq/boost"], revertable=False,
                 )
                 n += 1
             else:
@@ -295,7 +295,7 @@ def _oc_cpu_linux(reporter) -> int:
                     fix_cmds=[
                         "for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; "
                         "do echo performance | tee \"$f\"; done"
-                    ],
+                    ], revertable=False,
                 )
                 n += 1
             else:
@@ -786,7 +786,7 @@ ForEach-Object {
 }
 Write-Output "Done. A reboot is required for changes to take effect."
                 """.strip()
-            ],
+            ], revertable=False,
         )
         n += 1
 
