@@ -1440,8 +1440,37 @@ def _read_sysctl(key):
 
 # Each rule is (key, check_fn, why, fix).
 # check_fn(value_str) -> (severity, label) if bad, else None.
+# Linux kernel-hardening drop-in: a single file we own, where every sysctl fix
+# persists its key (append-or-replace, never clobbering other keys).
+_SYSCTL_DROPIN   = "/etc/sysctl.d/99-hardening.conf"
+_SYSCTL_FIX_DESC = ("Writes the setting to /etc/sysctl.d/99-hardening.conf "
+                    "(append-or-replace) and applies it immediately.")
+
+
+def _sysctl_fix(key, value):
+    """Fix commands for one kernel parameter: persist `key = value` in the
+    hardening drop-in without disturbing other keys, then apply at runtime.
+
+    key/value come only from the static _SYSCTL_RULES table — never user input —
+    but the command is still built quote-safely (shlex.quote on quote-adjacent
+    interpolations) to keep the injection-safety invariant exception-free.
+    """
+    qconf = shlex.quote(_SYSCTL_DROPIN)
+    line  = f"{key} = {value}"
+    pat   = f"^{key}[[:space:]]*="
+    return [
+        (
+            f"touch {qconf}; "
+            f"if grep -qE {shlex.quote(pat)} {qconf}; "
+            f"then sed -i 's|{pat}.*|{line}|' {qconf}; "
+            f"else printf '%s\\n' {shlex.quote(line)} >> {qconf}; fi; "
+            f"sysctl -p {qconf}"
+        ),
+    ]
+
+
 # (key, check_fn, why, fix_description, recommended_value)
-# recommended_value drives the auto-fix: `sysctl -w key=recommended_value`
+# recommended_value drives the auto-fix via _sysctl_fix(key, value).
 _SYSCTL_RULES = [
     (
         "kernel.randomize_va_space",
@@ -1453,8 +1482,7 @@ _SYSCTL_RULES = [
         ),
         "ASLR makes exploitation of memory-corruption bugs far harder. "
         "Value 2 enables full randomization of stack, heap, and mmap.",
-        "echo 'kernel.randomize_va_space=2' | sudo tee /etc/sysctl.d/99-hardening.conf"
-        " && sudo sysctl -p /etc/sysctl.d/99-hardening.conf",
+        _SYSCTL_FIX_DESC,
         "2",
     ),
     (
@@ -1462,7 +1490,7 @@ _SYSCTL_RULES = [
         lambda v: ("HIGH", "SYN-flood protection disabled (net.ipv4.tcp_syncookies=0)")
         if v == "0" else None,
         "SYN cookies protect against SYN-flood DoS attacks that exhaust connection queues.",
-        "Set net.ipv4.tcp_syncookies=1 in /etc/sysctl.d/99-hardening.conf",
+        _SYSCTL_FIX_DESC,
         "1",
     ),
     (
@@ -1471,7 +1499,7 @@ _SYSCTL_RULES = [
         if v != "0" else None,
         "Non-zero suid_dumpable lets setuid processes produce core dumps, "
         "potentially exposing secrets from privileged memory.",
-        "Set fs.suid_dumpable=0 in /etc/sysctl.d/99-hardening.conf",
+        _SYSCTL_FIX_DESC,
         "0",
     ),
     (
@@ -1480,8 +1508,7 @@ _SYSCTL_RULES = [
         if v == "1" else None,
         "IP forwarding turns this host into a router; unnecessary on a server "
         "and can be abused for traffic interception.",
-        "Set net.ipv4.ip_forward=0 in /etc/sysctl.d/99-hardening.conf "
-        "(unless this host is intentionally a router)",
+        _SYSCTL_FIX_DESC + " Skip if this host is intentionally a router.",
         "0",
     ),
     (
@@ -1490,7 +1517,7 @@ _SYSCTL_RULES = [
         if v == "0" else None,
         "Kernel logs can leak physical addresses, module paths, and other data "
         "useful for privilege escalation.",
-        "Set kernel.dmesg_restrict=1 in /etc/sysctl.d/99-hardening.conf",
+        _SYSCTL_FIX_DESC,
         "1",
     ),
     (
@@ -1499,7 +1526,7 @@ _SYSCTL_RULES = [
         if v == "0" else None,
         "kptr_restrict=0 leaks kernel symbol addresses via /proc, "
         "helping attackers defeat KASLR.",
-        "Set kernel.kptr_restrict=1 in /etc/sysctl.d/99-hardening.conf",
+        _SYSCTL_FIX_DESC,
         "1",
     ),
     (
@@ -1508,7 +1535,7 @@ _SYSCTL_RULES = [
         if v == "1" else None,
         "Accepting ICMP redirects allows a malicious router to silently "
         "reroute traffic on this host.",
-        "Set net.ipv4.conf.all.accept_redirects=0 in /etc/sysctl.d/99-hardening.conf",
+        _SYSCTL_FIX_DESC,
         "0",
     ),
     (
@@ -1516,7 +1543,7 @@ _SYSCTL_RULES = [
         lambda v: ("MEDIUM", "IPv6 ICMP redirect acceptance enabled")
         if v == "1" else None,
         "Same as IPv4: accepting ICMPv6 redirects allows silent traffic rerouting.",
-        "Set net.ipv6.conf.all.accept_redirects=0 in /etc/sysctl.d/99-hardening.conf",
+        _SYSCTL_FIX_DESC,
         "0",
     ),
     (
@@ -1525,7 +1552,7 @@ _SYSCTL_RULES = [
         if v == "1" else None,
         "Sending ICMP redirects is unnecessary on a non-router and "
         "can be used in network spoofing attacks.",
-        "Set net.ipv4.conf.all.send_redirects=0 in /etc/sysctl.d/99-hardening.conf",
+        _SYSCTL_FIX_DESC,
         "0",
     ),
     (
@@ -1534,7 +1561,7 @@ _SYSCTL_RULES = [
         if v == "0" else None,
         "rp_filter=0 allows packets with spoofed source addresses, "
         "enabling IP spoofing attacks.",
-        "Set net.ipv4.conf.all.rp_filter=1 in /etc/sysctl.d/99-hardening.conf",
+        _SYSCTL_FIX_DESC,
         "1",
     ),
 ]
@@ -1566,7 +1593,7 @@ def check_kernel_hardening(reporter):
         result = check_fn(val)
         if result:
             sev, label = result
-            fix_cmds = [f"sysctl -w {key}={recommended}"] if recommended else []
+            fix_cmds = _sysctl_fix(key, recommended) if recommended else []
             pending.append((sev, label, why, fix, fix_cmds))
 
     pending.sort(key=lambda f: SEVERITY_ORDER.get(f[0], 9))

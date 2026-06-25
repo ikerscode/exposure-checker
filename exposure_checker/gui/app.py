@@ -1187,11 +1187,12 @@ class _SessionTracker:
             snap = ec.take_snapshot(label=f"before: {label}")
         except Exception:
             return False
-        files    = snap.get("files", {})
-        captured = any(v is not None for v in files.values())
-        has_net  = bool(snap.get("ufw_status") or snap.get("ufw_rules"))
+        files      = snap.get("files", {})
+        captured   = any(v is not None for v in files.values())
+        has_net    = bool(snap.get("ufw_status") or snap.get("ufw_rules"))
+        has_sysctl = any(v is not None for v in snap.get("sysctl_prev", {}).values())
 
-        if captured or has_net:
+        if captured or has_net or has_sysctl:
             # Real state captured — record it so the fix can be reverted.
             self._snaps.append((label, snap))
             # Persist to disk on the first snap in this session so an abrupt

@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -57,6 +58,7 @@ def _snapshot_files_for_os():
         "/etc/ufw/user.rules",
         "/etc/ufw/user6.rules",
         "/etc/sysctl.conf",
+        "/etc/sysctl.d/99-hardening.conf",  # our drop-in: capture prior content
         "/etc/hosts",
     ]
 
@@ -250,6 +252,22 @@ def take_snapshot(label=""):
         except (OSError, subprocess.TimeoutExpired):
             pass
 
+    # Linux: record the prior runtime value of every kernel-hardening sysctl key
+    # so Revert Session can put them back (the fix now writes a drop-in + applies
+    # at runtime). An unreadable/absent key is recorded as None.
+    if _OS == "Linux":
+        prev = {}
+        try:
+            from .checks.security import _SYSCTL_RULES, _read_sysctl
+            for rule in _SYSCTL_RULES:
+                key = rule[0]
+                val, err = _read_sysctl(key)
+                prev[key] = None if err else val
+        except Exception:
+            prev = {}
+        snap["sysctl_prev"] = prev
+        snap["sysctl_dropin_existed"] = os.path.exists("/etc/sysctl.d/99-hardening.conf")
+
     return snap
 
 
@@ -339,6 +357,32 @@ def restore_snapshot(snap):
         else:
             rc, out = _run_fix_cmd("ufw disable")
             results.append(("ufw disable", rc == 0, out.strip()[:120]))
+
+    # Restore kernel (sysctl) parameters to their captured prior runtime values,
+    # then reconcile our hardening drop-in.
+    sysctl_prev = snap.get("sysctl_prev", {})
+    if sysctl_prev:
+        for key, prior in sysctl_prev.items():
+            if prior is None:
+                continue
+            rc, out = _run_fix_cmd(
+                f"sysctl -w {shlex.quote(key)}={shlex.quote(prior)}")
+            results.append((f"sysctl {key}={prior}", rc == 0, out.strip()[:120]))
+
+        dropin = "/etc/sysctl.d/99-hardening.conf"
+        if not snap.get("sysctl_dropin_existed", False):
+            # Gullwing created the drop-in — remove it so nothing persists.
+            try:
+                if os.path.exists(dropin):
+                    os.unlink(dropin)
+                results.append((f"remove {dropin}", True, ""))
+            except OSError as e:
+                results.append((f"remove {dropin}", False, str(e)))
+        # If the drop-in pre-existed, its prior content was captured in
+        # snap["files"] and already rewritten by the file-restore loop above.
+
+        rc, out = _run_fix_cmd("sysctl --system 2>/dev/null || true")
+        results.append(("sysctl --system", rc == 0, out.strip()[:120]))
 
     return results
 
