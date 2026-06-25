@@ -4043,10 +4043,32 @@ class App:
             return
         lines = self._tracker.summary_lines()
         detail = "\n".join(f"  • {l}" for l in lines)
+
+        # Name only the categories actually present in the earliest snapshot.
+        files = snap.get("files", {})
+        cats = []
+        if "/etc/ssh/sshd_config" in files:
+            cats.append("SSH config")
+        if snap.get("ufw_rules") or snap.get("ufw_status"):
+            cats.append("firewall rules")
+        if snap.get("sysctl_prev"):
+            cats.append("kernel (sysctl) parameters")
+        if any(k.lower().endswith("hosts") for k in files):
+            cats.append("the hosts file")
+        if not cats:
+            restore_line = "This will restore the captured system state"
+        elif len(cats) == 1:
+            restore_line = f"This will restore {cats[0]}"
+        elif len(cats) == 2:
+            restore_line = f"This will restore {cats[0]} and {cats[1]}"
+        else:
+            restore_line = ("This will restore " + ", ".join(cats[:-1])
+                            + f", and {cats[-1]}")
+
         if not messagebox.askyesno(
             "Revert Session Changes",
             f"Revert all changes made this session?\n\n{detail}\n\n"
-            "This will restore SSH config and firewall rules to the state "
+            f"{restore_line} to the state "
             "they were in before any fixes were applied.",
         ):
             return
