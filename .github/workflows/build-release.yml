@@ -1,14 +1,17 @@
-# Builds the desktop app for all three platforms and publishes a GitHub Release.
+# Builds the Gullwing HUD (webview UI) for all three platforms and publishes a
+# GitHub Release.
 #
-# Trigger: push a version tag, e.g.
-#   git tag v1.1.0
-#   git push origin v1.1.0
+#   • Push a version tag → builds + publishes a Release:
+#       git tag v2.0.0 && git push origin v2.0.0
+#   • Run manually (Actions → Build & Release → Run workflow) → builds + smoke-tests
+#     all three OSes and uploads the artifacts to the run WITHOUT publishing a
+#     release. Use this to validate a build before tagging.
 #
-# The release will contain:
-#   gullwing-macos.dmg        (drag-to-Applications installer)
-#   Gullwing.exe              (Windows standalone)
-#   gullwing-linux            (Linux standalone binary)
-#   checksums.txt             (SHA-256 digests for all three artifacts)
+# Release contents:
+#   gullwing-macos.dmg          (drag-to-Applications, contains Gullwing.app)
+#   gullwing-windows.zip        (unzip, run Gullwing.exe)
+#   gullwing-linux.tar.gz       (extract, run ./Gullwing/Gullwing)
+#   checksums.txt               (SHA-256 digests)
 
 name: Build & Release
 
@@ -16,6 +19,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch: {}
 
 jobs:
   version-guard:
@@ -23,6 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
       - name: Tag must match __version__
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           CODE="$(python3 - <<'PY'
           import re, pathlib
@@ -33,7 +38,7 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           echo "release tag = $TAG   __version__ = $CODE"
           if [ "$TAG" != "$CODE" ]; then
-            echo "::error::Release tag v$TAG does not match exposure_checker.__version__ ($CODE). Bump __version__ in exposure_checker/_core.py to match the tag, or retag." >&2
+            echo "::error::Release tag v$TAG does not match exposure_checker.__version__ ($CODE)." >&2
             exit 1
           fi
 
@@ -60,47 +65,61 @@ jobs:
         with:
           python-version: "3.12"
 
-      # tkinter ships with python.org Windows/macOS builds but not Ubuntu
-      - name: Install tkinter (Linux only)
+      # Qt WebEngine dlopen's a handful of system libraries at import time that
+      # aren't bundled by PyInstaller; install them so the Linux smoke test (and
+      # end users on minimal installs) can load the WebEngine runtime. xvfb lets
+      # the smoke run on the headless runner.
+      - name: Install Qt WebEngine runtime libs (Linux only)
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y python3-tk
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libnss3 libxcomposite1 libxdamage1 libxrandr2 libxkbcommon0 \
+            libgbm1 libasound2 libxshmfence1 libxtst6 libxcursor1 libxi6 \
+            libxrender1 libxcb-cursor0 libegl1 libopengl0 xvfb
 
-      - name: Install build dependencies
+      - name: Install build tooling
         run: pip install -r packaging/requirements-build.txt
 
-      - name: Install package
-        run: pip install -e .
+      - name: Install Gullwing + HUD dependencies
+        run: pip install -e ".[hud]"
 
-      - name: Build app
-        run: pyinstaller packaging/gullwing.spec
+      - name: Build HUD
+        run: pyinstaller packaging/gullwing-hud.spec --noconfirm
 
       # ── Smoke-test the built artifact ─────────────────────────────────────────
       # Building with the package pip-installed always resolves imports at build
-      # time, so a frozen binary that fails to resolve imports at runtime would
-      # still build green. Run the artifact itself to catch that.
+      # time, so a frozen binary that fails to resolve imports (or to bundle the
+      # Qt WebEngine runtime) at runtime would still build green. Run it to catch
+      # that — the HUD --smoke imports webview + Qt WebEngine + constructs Bridge.
       - name: Smoke-test built binary (Linux)
         if: runner.os == 'Linux'
-        run: ./dist/Gullwing --smoke
+        run: xvfb-run -a ./dist/Gullwing/Gullwing --smoke
 
       - name: Smoke-test built binary (Windows)
         if: runner.os == 'Windows'
-        run: ./dist/Gullwing.exe --smoke
+        run: ./dist/Gullwing/Gullwing.exe --smoke
 
       - name: Smoke-test built binary (macOS)
         if: runner.os == 'macOS'
         run: ./dist/Gullwing.app/Contents/MacOS/Gullwing --smoke
 
-      # ── macOS: wrap in .dmg ───────────────────────────────────────────────────
+      # ── Package per platform ──────────────────────────────────────────────────
       - name: Package macOS .dmg
         if: runner.os == 'macOS'
         run: |
           mkdir -p dist/dmg
-          cp -r "dist/Gullwing.app" dist/dmg/
-          hdiutil create \
-            -volname "Gullwing" \
-            -srcfolder dist/dmg \
-            -ov -format UDZO \
-            "dist/gullwing-macos.dmg"
+          cp -R "dist/Gullwing.app" dist/dmg/
+          hdiutil create -volname "Gullwing" -srcfolder dist/dmg \
+            -ov -format UDZO "dist/gullwing-macos.dmg"
+
+      - name: Package Windows .zip
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path dist/Gullwing -DestinationPath dist/gullwing-windows.zip
+
+      - name: Package Linux .tar.gz
+        if: runner.os == 'Linux'
+        run: tar -C dist -czf dist/gullwing-linux.tar.gz Gullwing
 
       # ── Upload per-platform artifact ──────────────────────────────────────────
       - name: Upload macOS artifact
@@ -114,19 +133,20 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: windows-exe
-          path: "dist/Gullwing.exe"
+          name: windows-zip
+          path: dist/gullwing-windows.zip
 
       - name: Upload Linux artifact
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: linux-bin
-          path: dist/Gullwing
+          name: linux-targz
+          path: dist/gullwing-linux.tar.gz
 
-  # ── Combine all artifacts into one GitHub Release ────────────────────────────
+  # ── Combine all artifacts into one GitHub Release (tags only) ────────────────
   release:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -136,17 +156,12 @@ jobs:
         with:
           path: artifacts
 
-      - name: Rename Linux binary
-        run: |
-          mv artifacts/linux-bin/Gullwing artifacts/linux-bin/gullwing-linux
-          chmod +x artifacts/linux-bin/gullwing-linux
-
       - name: Generate SHA-256 checksums
         run: |
           sha256sum \
             artifacts/macos-dmg/gullwing-macos.dmg \
-            artifacts/windows-exe/Gullwing.exe \
-            artifacts/linux-bin/gullwing-linux \
+            artifacts/windows-zip/gullwing-windows.zip \
+            artifacts/linux-targz/gullwing-linux.tar.gz \
             > checksums.txt
           cat checksums.txt
 
@@ -155,19 +170,23 @@ jobs:
         with:
           name: "Gullwing ${{ github.ref_name }}"
           body: |
+            ## Gullwing ${{ github.ref_name }} — the new HUD interface
+
+            A futuristic, fully local "mission control" for your machine's security
+            and performance. 100% offline — no telemetry, no account, no cloud.
+
             ## Download
 
-            | Platform | File | Notes |
+            | Platform | File | How to run |
             |---|---|---|
-            | macOS | `gullwing-macos.dmg` | Open DMG → drag app to Applications |
-            | Windows | `Gullwing.exe` | Run as Administrator for full results |
-            | Linux | `gullwing-linux` | `chmod +x` then run |
+            | macOS | `gullwing-macos.dmg` | Open the DMG → drag **Gullwing** to Applications. First launch: right-click → Open. |
+            | Windows | `gullwing-windows.zip` | Unzip, run **Gullwing.exe**. Run as Administrator for full results. |
+            | Linux | `gullwing-linux.tar.gz` | `tar xzf` then `./Gullwing/Gullwing` |
 
-            ## What's new
-            <!-- fill in release notes here -->
+            Verify your download against `checksums.txt` (SHA-256).
           files: |
             artifacts/macos-dmg/gullwing-macos.dmg
-            artifacts/windows-exe/Gullwing.exe
-            artifacts/linux-bin/gullwing-linux
+            artifacts/windows-zip/gullwing-windows.zip
+            artifacts/linux-targz/gullwing-linux.tar.gz
             checksums.txt
           fail_on_unmatched_files: true

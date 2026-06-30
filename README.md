@@ -1,7 +1,12 @@
-# Gullwing v1.1.3
+# Gullwing v2.0.0
 
 **Tune it. Lock it. Send it.** — a fully local, offline desktop companion for Windows, macOS, and Linux.  
 No cloud. No APIs. No telemetry. No account. Everything runs on your machine.
+
+> **New in v2.0 — the HUD.** Gullwing's interface is now a futuristic, JARVIS-style
+> "mission control" surface: a live system-integrity core, real-time hardware
+> sensors, and a contextual action panel for all six modules. Same local, reversible
+> engine underneath — brand-new face. See [What's New in v2.0.0](#whats-new-in-v200).
 
 ---
 
@@ -13,7 +18,7 @@ Most "PC optimizers" do one thing, phone home, and ask you to trust a black box.
 - **🔒 100% local & private.** Nothing ever leaves your machine. No telemetry, no analytics, no API keys, no account. Every fix is a plain shell / PowerShell / registry command, shown to you before it runs.
 - **↩️ Reversible by default.** Before changing a config file, Gullwing snapshots it to disk so one **Revert Session** button can roll the change back — and that snapshot survives even an abrupt crash. Actions that genuinely can't be undone (cleaner deletions, Windows registry/service tweaks) are labelled honestly so you always know what's reversible.
 - **👁️ Transparent.** Every finding has a severity, a plain-English explanation, and the exact command behind its **Fix** button. *Copy Commands* lets you run them yourself.
-- **✨ Beautiful.** A cinematic, hardware-accelerated loading screen and an Opera-GX-style live hardware monitor — a tool you actually want to open.
+- **✨ Beautiful.** A futuristic, JARVIS-style HUD — a live system-integrity core ring, a real-time hardware sensor rail, and an animated mission-control surface — a tool you actually want to open.
 
 > **The trust pitch:** other cleaners had to earn back trust after telemetry scandals. Gullwing can't leak what it never collects.
 
@@ -23,42 +28,36 @@ Most "PC optimizers" do one thing, phone home, and ask you to trust a black box.
 
 > **New here?** [GETTING-STARTED.md](GETTING-STARTED.md) is a two-minute first-run guide — scanning, what the score means, how Fix prompts you, and exactly what Revert can and can't undo.
 
-> **Optional — cinematic splash:** Gullwing ships a hardware-accelerated Venice-sunset loading screen. To enable it, install the extra:
-> ```bash
-> pip install "pygame-ce" "numpy"      # or: pip install -e ".[splash]"
-> ```
-> Without these it falls back to the built-in animated splash — the app works either way.
+### Download (recommended)
 
+Grab the latest build for your OS from the [**Releases**](../../releases/latest) page —
+no Python, no setup. The HUD is fully self-contained (Qt is bundled, so there's
+nothing extra to install).
 
-**Recommended (all platforms):** run the installer once, then launch from your
-app menu or with the `gullwing-ui` command.
+| Platform | File | How to run |
+|---|---|---|
+| **macOS** | `gullwing-macos.dmg` | Open the DMG → drag **Gullwing** to Applications. First launch: right-click → **Open** (unsigned build). |
+| **Windows** | `gullwing-windows.zip` | Unzip, run **Gullwing.exe**. Run as Administrator for full results. |
+| **Linux** | `gullwing-linux.tar.gz` | `tar xzf gullwing-linux.tar.gz` then `./Gullwing/Gullwing` |
 
-### Windows
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install.ps1
-```
-Then run `gullwing-ui`, or launch from the Start menu.
+Verify your download against `checksums.txt` (SHA-256) on the release.
 
-### macOS
+### Run from source
+
 ```bash
-bash scripts/install.sh
+pip install -e ".[hud]"     # pywebview + PySide6 (Qt WebEngine) + psutil
+gullwing-hud                 # launch the HUD
+# or, from the repo root:
+python -m exposure_checker.webui.app
 ```
-Then run `gullwing-ui`, or launch Gullwing from Spotlight.
 
-### Linux
-1. Install Tkinter if you haven't already:
-   ```bash
-   sudo apt install python3-tk -y
-   ```
-2. Run the installer, then search **Gullwing** in your app launcher:
-   ```bash
-   bash scripts/install.sh
-   ```
+> **Classic interface.** The original Tkinter UI is still included and unchanged.
+> Launch it with `gullwing-ui` (or `python -m exposure_checker.gui.app`) — handy on
+> systems where a Qt WebEngine window isn't available.
 
-> **Run without installing** (from the repo root, using the venv):
-> ```bash
-> python -m exposure_checker.gui.app
-> ```
+> **Optional — cinematic splash** (classic UI only): `pip install -e ".[splash]"`
+> enables a hardware-accelerated loading screen; without it the app falls back to a
+> built-in splash.
 
 ---
 
@@ -358,6 +357,16 @@ The Fix button shows you the exact command it will run, and you are always in co
 - **Accept Risk.** Dismiss a finding you've reviewed and don't want to fix — it won't nag you on the next scan.
 - **Copy Commands.** Prefer to run things yourself? Copy the exact commands and paste them into your own terminal.
 - **Disk-space pre-flight.** Fixes that write to disk warn you first if space is critically low.
+
+---
+
+## What's New in v2.0.0
+
+- **🚀 A brand-new HUD interface.** Gullwing's flat window is replaced by a futuristic, JARVIS-style "mission control" surface: a live **system-integrity core** ring that animates to your score, a **real-time hardware sensor rail** (CPU load/temp, memory, storage, network), and a contextual action panel — all six modules (Overview, Performance, Security, Cleaner, Benchmark, Overclock Advisor) on one animated screen.
+- **🧠 Same engine, new face.** The HUD is a thin web layer over Gullwing's existing scan/fix/revert/clean/benchmark/overclock logic via a Python↔JS bridge. Every finding still shows its **exact command**, snapshots are still taken before fixes, and **Revert Session** still rolls everything back. No behavioural regressions — the security, snapshot, and tamper-proof-remediation work from v1.x is reused verbatim.
+- **🔌 Self-contained, still 100% offline.** The interface is local HTML/CSS/JS rendered in a bundled Qt WebEngine window (via pywebview + PySide6) — no browser, no system packages, no network. A strict Content-Security-Policy and self-hosted fonts mean **zero outbound connections**, keeping the local/private guarantee intact. Live sensors read kernel counters only (psutil) — no pings, no calls.
+- **📦 One-click downloads for all three OSes.** Releases now ship ready-to-run builds — `gullwing-macos.dmg`, `gullwing-windows.zip`, `gullwing-linux.tar.gz` — with SHA-256 checksums. Nothing to install.
+- **🖥️ Classic UI still included.** The original Tkinter interface remains available via `gullwing-ui` for environments without Qt WebEngine.
 
 ---
 

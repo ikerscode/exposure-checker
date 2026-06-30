@@ -29,10 +29,21 @@ splash = [
     "pygame-ce>=2.4",
     "numpy>=1.23",
 ]
+# Sentinel HUD — the webview-based interface (exposure_checker.webui). pywebview
+# wraps a local HTML/CSS/JS HUD; PySide6 + qtpy provide the Qt WebEngine backend
+# (pip-installable on Windows/macOS/Linux, so no end-user system packages); psutil
+# feeds the live sensor rail. All MIT/LGPL/BSD; none make network calls.
+hud = [
+    "pywebview>=5",
+    "PySide6>=6.6",
+    "qtpy>=2.4",
+    "psutil>=5.9",
+]
 
 [project.scripts]
-gullwing    = "exposure_checker:main"
-gullwing-ui = "exposure_checker.gui.app:main"
+gullwing     = "exposure_checker:main"
+gullwing-ui  = "exposure_checker.gui.app:main"
+gullwing-hud = "exposure_checker.webui.app:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "exposure_checker._core.__version__"}
@@ -42,7 +53,7 @@ where = ["."]
 include = ["exposure_checker*"]
 
 [tool.setuptools.package-data]
-"exposure_checker" = ["gui/assets/**/*"]
+"exposure_checker" = ["gui/assets/**/*", "webui/assets/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

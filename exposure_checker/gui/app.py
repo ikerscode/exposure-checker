@@ -29,6 +29,12 @@ from tkinter import filedialog, font as tkfont, messagebox, ttk
 
 import exposure_checker as ec
 from exposure_checker.gui import theme as T
+from exposure_checker._elevate import (
+    _is_root, _elevation_available, _batch_fix_elevated,
+    _batch_fix_linux, _batch_fix_macos, _batch_fix_windows,
+    _parse_batch_output, _assemble_preview_cmds,
+)
+from exposure_checker._session import _SessionTracker
 
 
 def _sev_pill(parent, text, bg, fg):
@@ -754,27 +760,10 @@ class _UIReporter(ec._Reporter):
 
 
 # ── Privilege / batch-fix helpers ─────────────────────────────────────────────
-
-def _is_root():
-    if _UI_OS == "Windows":
-        try:
-            import ctypes
-            return bool(ctypes.windll.shell32.IsUserAnAdmin())
-        except Exception:
-            return False
-    return os.geteuid() == 0
-
-
-def _elevation_available() -> bool:
-    """True if we can ask for elevated privileges on this platform."""
-    if _UI_OS == "Linux":
-        return bool(shutil.which("pkexec"))
-    if _UI_OS == "Darwin":
-        return bool(shutil.which("osascript"))
-    if _UI_OS == "Windows":
-        return bool(shutil.which("powershell"))
-    return False
-
+# _is_root, _elevation_available, the batch-fix runners, _parse_batch_output and
+# _assemble_preview_cmds now live in exposure_checker._elevate (pure, no Tkinter)
+# and are imported at the top of this module. _ensure_admin stays here because it
+# shows a Tk messagebox and re-execs this GUI entry point.
 
 def _ensure_admin() -> None:
     """Re-launch the GUI with admin privileges if not already elevated.
@@ -844,210 +833,6 @@ _FIRST_RUN_FLAG = os.path.join(
     os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
     "exposure-checker", "first_run_done",
 )
-
-
-def _batch_fix_elevated(findings):
-    """Collect ALL fix_cmds and run them with a SINGLE elevation prompt.
-    Returns list of (cmd, returncode, output) or None if no escalation tool."""
-    cmds = [cmd for f in findings for cmd in f.get("fix_cmds", [])]
-    if not cmds:
-        return []
-
-    if _is_root():
-        results = []
-        for cmd in cmds:
-            rc, out = ec._run_fix_cmd(cmd)
-            results.append((cmd, rc, out))
-        return results
-
-    if _UI_OS == "Darwin":
-        return _batch_fix_macos(cmds)
-    if _UI_OS == "Windows":
-        return _batch_fix_windows(cmds)
-    return _batch_fix_linux(cmds)
-
-
-def _batch_fix_linux(cmds):
-    """Single pkexec prompt for all fixes on Linux."""
-    pkexec = shutil.which("pkexec")
-    if not pkexec:
-        return None
-
-    lines = ["#!/bin/bash"]
-    for i, cmd in enumerate(cmds):
-        lines.append(f'printf "\\n##ECCMD{i}##\\n"')
-        lines.append(f'{{ {cmd}; }} 2>&1')
-        lines.append(f'printf "##ECEXIT{i}:%d##\\n" "$?"')
-
-    fd, spath = tempfile.mkstemp(suffix=".sh", prefix="ec-fix-")
-    try:
-        with os.fdopen(fd, "w") as fh:
-            fh.write("\n".join(lines) + "\n")
-        os.chmod(spath, 0o700)
-        result = subprocess.run([pkexec, "bash", spath],
-                                capture_output=True, text=True, timeout=120)
-        return _parse_batch_output(cmds, result.stdout)
-    except subprocess.TimeoutExpired:
-        return [(c, 1, "timed out") for c in cmds]
-    except OSError as exc:
-        return [(c, 1, str(exc)) for c in cmds]
-    finally:
-        try:
-            os.unlink(spath)
-        except OSError:
-            pass
-
-
-def _batch_fix_macos(cmds):
-    """Single osascript administrator prompt for ALL fixes on macOS.
-
-    Previously each command spawned its own `do shell script ... with
-    administrator privileges` → one password dialog *per fix*. Now all
-    commands run inside one marker-tagged shell script behind one prompt.
-    """
-    lines = []
-    for i, cmd in enumerate(cmds):
-        lines.append(f'printf "\\n##ECCMD{i}##\\n"')
-        lines.append(f'{{ {cmd}; }} 2>&1')
-        lines.append(f'printf "##ECEXIT{i}:%d##\\n" "$?"')
-    fd, spath = tempfile.mkstemp(suffix=".sh", prefix="ec-fix-")
-    try:
-        with os.fdopen(fd, "w") as fh:
-            fh.write("\n".join(lines) + "\n")
-        os.chmod(spath, 0o700)
-        safe = spath.replace("\\", "\\\\").replace('"', '\\"')
-        script = f'do shell script "/bin/bash \\"{safe}\\"" with administrator privileges'
-        r = subprocess.run(["osascript", "-e", script],
-                           capture_output=True, text=True, errors="replace",
-                           timeout=max(120, 60 * len(cmds)))
-        if r.returncode != 0 and "##ECCMD" not in r.stdout:
-            # User cancelled the auth dialog or osascript failed outright
-            msg = r.stderr.strip() or "authorization cancelled"
-            return [(c, 1, msg) for c in cmds]
-        return _parse_batch_output(cmds, r.stdout)
-    except subprocess.TimeoutExpired:
-        return [(c, 1, "timed out") for c in cmds]
-    except OSError as exc:
-        return [(c, 1, str(exc)) for c in cmds]
-    finally:
-        try:
-            os.unlink(spath)
-        except OSError:
-            pass
-
-
-def _batch_fix_windows(cmds):
-    """Single UAC prompt for ALL fixes on Windows.
-
-    Each command is wrapped in try/catch with $ErrorActionPreference='Stop'
-    so cmdlet failures are caught. Output is written via Out-File -Encoding
-    ASCII to guarantee no BOM — PS5.1 Add-Content -Encoding UTF8 writes a
-    BOM on new files which breaks marker parsing.
-    """
-    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    fd, script_path = tempfile.mkstemp(suffix=".ps1", prefix="ec-fix-")
-    out_path = script_path + ".out"
-    # Both paths come from tempfile.mkstemp() so they can't contain quotes, but
-    # quote anyway so the escaping invariant has no exceptions. ps_out fills a
-    # simple '{}' slot (ec._ps_quote wraps + escapes); ps_scr is embedded inside
-    # a nested \"...\" Start-Process argument below, so it keeps an inline escape.
-    ps_scr = script_path.replace("'", "''")  # PS single-quote escape (nested)
-
-    lines = [f"$__f = {ec._ps_quote(out_path)}"]
-    for i, cmd in enumerate(cmds):
-        lines += [
-            f'"##ECCMD{i}##" | Out-File -Append -Encoding ASCII -FilePath $__f',
-            f"$__c = 0",
-            f"try {{",
-            f"    $ErrorActionPreference = 'Stop'",
-            f"    & {{ {cmd} }} 2>&1 | Out-String -Stream"
-            f" | Out-File -Append -Encoding ASCII -FilePath $__f",
-            f"    if ($LASTEXITCODE) {{ $__c = $LASTEXITCODE }}",
-            f"}} catch {{",
-            f"    $ErrorActionPreference = 'Continue'",
-            f'    "Error: $_" | Out-File -Append -Encoding ASCII -FilePath $__f',
-            f"    $__c = 1",
-            f"}}",
-            f"$ErrorActionPreference = 'Continue'",
-            f'"##ECEXIT{i}:$__c##" | Out-File -Append -Encoding ASCII -FilePath $__f',
-        ]
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8-sig") as fh:
-            fh.write("\n".join(lines) + "\n")
-        runner = (
-            f"Start-Process powershell.exe "
-            f"-ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','\"{ps_scr}\"' "
-            f"-Verb RunAs -WindowStyle Hidden -Wait"
-        )
-        r = subprocess.run(
-            ["powershell", "-NonInteractive", "-NoProfile", "-Command", runner],
-            capture_output=True, text=True, errors="replace",
-            timeout=max(120, 60 * len(cmds)), creationflags=no_window,
-        )
-        if "denied" in (r.stderr or "").lower() or "cancel" in (r.stderr or "").lower():
-            return [(c, 1, "UAC prompt declined") for c in cmds]
-        try:
-            with open(out_path, encoding="ascii", errors="replace") as fh:
-                stdout = fh.read()
-        except OSError:
-            stdout = ""
-        if "##ECCMD" not in stdout:
-            return [(c, 1, (r.stderr or "elevation failed").strip()) for c in cmds]
-        return _parse_batch_output(cmds, stdout)
-    except subprocess.TimeoutExpired:
-        return [(c, 1, "timed out") for c in cmds]
-    except OSError as exc:
-        return [(c, 1, str(exc)) for c in cmds]
-    finally:
-        for p in (script_path, out_path):
-            try:
-                os.unlink(p)
-            except OSError:
-                pass
-
-
-def _parse_batch_output(cmds, stdout):
-    """Parse marker-tagged output from the batch-fix script."""
-    outputs: dict = {}
-    exits:   dict = {}
-    cur_idx        = None
-    cur_out:  list = []
-
-    for line in stdout.splitlines():
-        m = re.match(r"##ECCMD(\d+)##", line.strip())
-        if m:
-            if cur_idx is not None:
-                outputs[cur_idx] = "\n".join(cur_out).strip()
-            cur_idx = int(m.group(1))
-            cur_out = []
-            continue
-        m = re.match(r"##ECEXIT(\d+):(\d+)##", line.strip())
-        if m:
-            i, rc = int(m.group(1)), int(m.group(2))
-            exits[i] = rc
-            if cur_idx is not None:
-                outputs[cur_idx] = "\n".join(cur_out).strip()
-                cur_idx = None
-                cur_out = []
-            continue
-        if cur_idx is not None:
-            cur_out.append(line)
-
-    return [(cmd, exits.get(i, 1), outputs.get(i, ""))
-            for i, cmd in enumerate(cmds)]
-
-
-def _assemble_preview_cmds(findings, force_sudo=None) -> str:
-    """The commands that will run, one per line — sudo-prefixed on POSIX when
-    elevation applies. Shared by the confirm dialog and the denied dialog so the
-    preview always matches what is actually executed."""
-    all_cmds = [cmd for f in findings for cmd in f.get("fix_cmds", [])]
-    if _UI_OS == "Windows":
-        return "\n".join(all_cmds)
-    use_sudo = (not _is_root()) if force_sudo is None else force_sudo
-    if use_sudo:
-        return "\n".join(f"sudo {c}" for c in all_cmds)
-    return "\n".join(all_cmds)
 
 
 def _confirm_fix_dialog(parent, findings) -> bool:
@@ -1166,79 +951,6 @@ def _show_fix_denied_dialog(root, findings):
 
 
 # ── Session tracker ────────────────────────────────────────────────────────────
-
-class _SessionTracker:
-    """Captures pre-fix snapshots so everything applied this session can be reverted.
-
-    On first successful before_fix() call the snapshot is also written to
-    ~/.local/share/gullwing/sessions/<ts>/ so that an incomplete session
-    (app killed mid-fix) is detectable on next launch.  mark_complete() is
-    called when the user finishes a revert, adding a 'completed' sentinel.
-    """
-
-    def __init__(self):
-        self._snaps:      list = []   # [(label, snap_dict)]
-        self._session_ts: str  = ""   # set on first successful before_fix
-
-    def before_fix(self, label: str) -> bool:
-        """Capture pre-fix state. Returns True on success, False if snapshot failed.
-        The caller MUST abort the fix if this returns False."""
-        try:
-            snap = ec.take_snapshot(label=f"before: {label}")
-        except Exception:
-            return False
-        files      = snap.get("files", {})
-        captured   = any(v is not None for v in files.values())
-        has_net    = bool(snap.get("ufw_status") or snap.get("ufw_rules"))
-        has_sysctl = any(v is not None for v in snap.get("sysctl_prev", {}).values())
-
-        if captured or has_net or has_sysctl:
-            # Real state captured — record it so the fix can be reverted.
-            self._snaps.append((label, snap))
-            # Persist to disk on the first snap in this session so an abrupt
-            # kill leaves a recoverable manifest.
-            if not self._session_ts:
-                import datetime as _dt
-                self._session_ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-            ec.write_session_manifest(self._session_ts, label, snap)
-            return True
-
-        # On Linux/macOS the captured files ARE what the fixes edit, so if they
-        # exist on disk but came back as None (present but unreadable, e.g.
-        # permission denied) a later revert would fail — abort to protect the
-        # user's config. On Windows the captured hosts file is unrelated to the
-        # registry/service fixes being applied, so an unreadable hosts file must
-        # never block a fix.
-        if _UI_OS != "Windows" and any(v is None for v in files.values()):
-            return False
-
-        # Nothing on this system to snapshot (e.g. Windows fixes are registry/
-        # service changes the snapshot system doesn't track). The fix isn't
-        # revertable, but there's nothing to protect — let it proceed instead
-        # of blocking the user outright.
-        return True
-
-    @property
-    def has_changes(self):
-        return bool(self._snaps)
-
-    def earliest_snap(self):
-        return self._snaps[0][1] if self._snaps else None
-
-    def summary_lines(self):
-        lines = []
-        for label, snap in self._snaps:
-            ts = snap.get("timestamp", "?")[:19].replace("T", " ")
-            lines.append(f"[{ts}]  {label}")
-        return lines
-
-    def clear(self):
-        """Clear in-memory state and mark the on-disk session as completed."""
-        if self._session_ts:
-            ec.mark_session_complete(self._session_ts)
-            self._session_ts = ""
-        self._snaps.clear()
-
 
 # ── FindingsPane ───────────────────────────────────────────────────────────────
 
