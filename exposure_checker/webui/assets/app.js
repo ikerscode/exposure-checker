@@ -24,8 +24,8 @@ const ICON = {
 
 /* ── modules ───────────────────────────────────────────────────────────────*/
 const MODULES = [
-  { id:"home",  num:"01", title:"SYSTEM OVERVIEW",     desc:"full-spectrum integrity sweep",
-    nav:"OVERVIEW",    primary:"RUN DIAGNOSTIC", ico:"search", feed:"ANOMALY FEED",          feedsub:"all findings" },
+  { id:"home",  num:"01", title:"SYSTEM OVERVIEW",     desc:"Every subsystem, scored and monitored in real time.",
+    nav:"OVERVIEW",    primary:"RUN DIAGNOSTIC", ico:"search", feed:"ANOMALY FEED",          feedsub:"All subsystems · one-click reversible fixes" },
   { id:"perf",  num:"02", title:"PERFORMANCE TUNING",  desc:"latency · power · throughput",
     nav:"PERFORMANCE", primary:"SCAN PERFORMANCE", ico:"bolt", feed:"PERFORMANCE FINDINGS", feedsub:"tuning opportunities" },
   { id:"sec",   num:"03", title:"SECURITY AUDIT",       desc:"exposure & hardening review",
@@ -146,7 +146,7 @@ function renderCore(){
     color = sc ? gradeLetter(liveScore)[2] : "var(--cy)";
     gaugeVal = liveScore;
     if (m === "home"){
-      top = S.scanning ? "ANALYZING" : "INTEGRITY";
+      top = S.scanning ? "ANALYZING" : "GULLWING";
       bigHTML = `<span data-grade style="color:${color}">${sc ? gradeLetter(liveScore)[0] : "—"}</span>`;
       sub = `<span data-score>${liveScore}</span> / 100`;
       tag = "SYSTEM INTEGRITY";
@@ -222,10 +222,13 @@ function renderChips(){
   const c = $("chips"); c.innerHTML = ""; const m = S.active;
   const add = (label, val, gold) => { const ch = el("div", "chip"+(gold?" gold":""),
     `${label}<b>${val}</b>`); c.appendChild(ch); };
+  const addSev = (label, sevVar, val) => { const ch = el("div", "chip",
+    `<span class="chip-dot" style="background:var(${sevVar})"></span>${label}<b>${val}</b>`);
+    c.appendChild(ch); };
   if (m === "home" || m === "perf" || m === "sec"){
     const sc = S.scans[m] || {counts:{}};
-    add("HIGH", sc.counts.HIGH||0); add("MED", sc.counts.MEDIUM||0);
-    add("REVIEW", sc.counts.REVIEW||0); add("INFO", sc.counts.INFO||0);
+    addSev("HIGH", "--high", sc.counts.HIGH||0); addSev("MEDIUM", "--med", sc.counts.MEDIUM||0);
+    addSev("REVIEW", "--review", sc.counts.REVIEW||0); addSev("INFO", "--info", sc.counts.INFO||0);
   } else if (m === "clean"){
     const n = [...S.cleanSel].filter(id => !S.fixed.has(id)).length;
     add("SELECTED", n, true); add("RECLAIM", cleanSelectedGB().toFixed(1)+" GB", true);
@@ -367,12 +370,12 @@ function renderHeader(){
 
 /* ── panel count ───────────────────────────────────────────────────────────*/
 function renderPanelCount(){
-  const m = S.active; let n = 0;
-  if (["home","perf","sec"].includes(m)) n = (S.scans[m]?.findings.length)||0;
+  const m = S.active; let n = 0, suffix = "";
+  if (["home","perf","sec"].includes(m)){ n = (S.scans[m]?.findings.length)||0; suffix = " ACTIVE"; }
   else if (m === "clean") n = (S.scans.clean?.findings.length)||0;
   else if (m === "bench") n = (S.bench?.cards.length)||0;
   else if (m === "oc")    n = (S.oc?.cards.length)||0;
-  $("panelCount").textContent = n;
+  $("panelCount").textContent = n + suffix;
 }
 
 /* ── full render of the dynamic regions ────────────────────────────────────*/
