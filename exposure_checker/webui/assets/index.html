@@ -35,129 +35,145 @@
 
   <!-- ambient overlays -->
   <div class="ov ov-grid"></div>
-  <div class="ov ov-glow" id="ovGlow"></div>
-  <div class="ov ov-scan" id="ovScan"></div>
   <div class="ov ov-vignette"></div>
 
-  <!-- top bar -->
-  <header class="topbar">
-    <div class="brand">
-      <svg class="gull" viewBox="0 0 32 20" width="34" height="22" aria-hidden="true">
-        <path d="M2 17 Q 12 3 16 11 Q 20 3 30 17" />
-      </svg>
-      <div class="brand-text">
-        <div class="wordmark">GULLWING</div>
-        <div class="brand-sub" id="brandSub">SECURITY CORE · v—</div>
-      </div>
-    </div>
+  <div class="appshell">
 
-    <div class="jarvis">
-      <div class="wave" id="wave" aria-hidden="true"></div>
-      <div class="jarvis-line"><span class="jarvis-tag">GULLWING ›</span>
-        <span id="jarvisText">initialising…</span></div>
-    </div>
-
-    <div class="status">
-      <span class="pip" aria-hidden="true"></span>
-      <span class="status-text">OFFLINE · SECURE LINK</span>
-      <span class="clock" id="clock">––:––:––</span>
-    </div>
-  </header>
-
-  <!-- screen header band -->
-  <div class="screenhead">
-    <div class="screenhead-left">
-      <div class="modbadge"><div class="modbadge-num" id="pageNum">01</div>
-        <div class="modbadge-cap">MODULE</div></div>
-      <div class="screenhead-titles" id="screenTitles">
-        <div class="page-title" id="pageTitle">SYSTEM OVERVIEW</div>
-        <div class="page-desc" id="pageDesc">full-spectrum integrity sweep</div>
-      </div>
-    </div>
-    <div class="screenhead-right">
-      <div class="stepper" id="stepper"></div>
-      <div class="counter"><span id="counterNum">01</span> / 06</div>
-    </div>
-  </div>
-
-  <!-- middle: 3 columns -->
-  <div class="middle">
-
-    <!-- ① left sensor rail -->
-    <aside class="rail">
-      <div class="rail-head">
-        <div class="chit">1</div>
-        <div><div class="rail-title">LIVE SENSORS</div>
-          <div class="rail-sub">real-time hardware · always on</div></div>
-      </div>
-      <div class="sensors" id="sensors"></div>
-    </aside>
-
-    <!-- ② center core -->
-    <section class="core">
-      <div class="core-head">
-        <div class="chit">2</div>
-        <div class="core-head-title">SYSTEM HEALTH</div>
-      </div>
-      <div class="stage" id="stage">
-        <svg class="deco" viewBox="0 0 460 460" aria-hidden="true">
-          <g class="deco-spin deco-90">
-            <circle cx="230" cy="230" r="210" class="deco-ring" stroke-dasharray="3 12"/>
-          </g>
-          <g class="deco-spin deco-55 rev">
-            <circle cx="230" cy="230" r="182" class="deco-ring" stroke-dasharray="2 22"/>
-          </g>
-          <g class="deco-spin deco-140">
-            <circle cx="230" cy="230" r="156" class="deco-ring2" stroke-dasharray="1 9"/>
-          </g>
-          <g class="deco-spin deco-200 rev">
-            <polygon points="230,118 327,174 327,286 230,342 133,286 133,174" class="deco-hex"/>
-          </g>
-          <circle cx="230" cy="20"  r="3" class="deco-node"/>
-          <circle cx="230" cy="440" r="3" class="deco-node"/>
-          <circle cx="20"  cy="230" r="3" class="deco-node"/>
-          <circle cx="440" cy="230" r="3" class="deco-node"/>
+    <!-- side nav: module switcher, always on the left -->
+    <nav class="sidenav" id="sidenav">
+      <div class="sidenav-brand">
+        <svg class="gull" viewBox="0 0 32 20" width="26" height="17" aria-hidden="true">
+          <path d="M2 17 Q 12 3 16 11 Q 20 3 30 17" />
         </svg>
-        <div class="breathe" id="breathe"></div>
-        <div class="gauge-wrap" id="gaugeWrap"></div>
-        <div class="reticle" id="reticle"></div>
-        <div class="readout" id="readout"></div>
       </div>
-      <div class="chips" id="chips"></div>
-      <button class="primary" id="primaryBtn"><span class="primary-ico" id="primaryIco"></span>
-        <span id="primaryLabel">RUN DIAGNOSTIC</span></button>
-    </section>
+      <div class="sidenav-items" id="sidenavItems"></div>
+      <div class="sidenav-foot">
+        <span class="pip" aria-hidden="true"></span>
+      </div>
+    </nav>
 
-    <!-- ③ right action panel -->
-    <aside class="panel">
-      <div class="panel-head">
-        <div class="chit">3</div>
-        <div class="panel-head-text">
-          <div class="panel-title" id="panelTitle">ANOMALY FEED</div>
-          <div class="panel-sub" id="panelSub">all findings</div>
+    <div class="mainarea">
+
+      <!-- top bar -->
+      <header class="topbar">
+        <div class="brand-text">
+          <div class="wordmark">GULLWING</div>
+          <div class="brand-sub" id="brandSub">SECURITY CORE · v—</div>
         </div>
-        <div class="panel-count" id="panelCount">0</div>
+
+        <div class="jarvis">
+          <div class="wave" id="wave" aria-hidden="true"></div>
+          <div class="jarvis-line"><span class="jarvis-tag">GULLWING ›</span>
+            <span id="jarvisText">initialising…</span></div>
+        </div>
+
+        <div class="status">
+          <span class="status-text">OFFLINE · SECURE LINK</span>
+          <span class="clock" id="clock">––:––:––</span>
+        </div>
+      </header>
+
+      <!-- screen header band -->
+      <div class="screenhead">
+        <div class="screenhead-left">
+          <div class="modbadge"><div class="modbadge-num" id="pageNum">01</div>
+            <div class="modbadge-cap">MODULE</div></div>
+          <div class="screenhead-titles" id="screenTitles">
+            <div class="page-title" id="pageTitle">SYSTEM OVERVIEW</div>
+            <div class="page-desc" id="pageDesc">full-spectrum integrity sweep</div>
+          </div>
+        </div>
+        <div class="screenhead-right">
+          <div class="stepper" id="stepper"></div>
+          <div class="counter"><span id="counterNum">01</span> / <span id="counterTotal">06</span></div>
+        </div>
       </div>
-      <div class="feed" id="feed"></div>
-    </aside>
 
-  </div>
+      <!-- middle: 3 columns -->
+      <div class="middle">
 
-  <!-- bottom bar -->
-  <footer class="bottombar">
-    <div class="nav-label">MODULES</div>
-    <nav class="nav" id="nav"></nav>
-    <div class="ticker"><div class="ticker-track" id="tickerTrack"></div></div>
-    <div class="tallies">
-      <div class="tally"><span class="tally-num open" id="tallyOpen">0</span> OPEN</div>
-      <div class="tally"><span class="tally-num fixed" id="tallyFixed">0</span> FIXED</div>
-      <button class="revert" id="revertBtn" disabled>
-        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path
-          d="M3 8a5 5 0 1 1 1.6 3.7" fill="none" stroke="currentColor" stroke-width="1.5"/>
-          <path d="M3 4v4h4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-        REVERT SESSION</button>
-    </div>
-  </footer>
+        <!-- ① left sensor rail -->
+        <aside class="rail">
+          <div class="rail-head">
+            <div class="chit">1</div>
+            <div><div class="rail-title">LIVE SENSORS</div>
+              <div class="rail-sub">real-time hardware · always on</div></div>
+          </div>
+          <div class="sensors" id="sensors"></div>
+        </aside>
+
+        <!-- ② center core -->
+        <section class="core">
+          <div class="core-head">
+            <div class="chit">2</div>
+            <div class="core-head-title">SYSTEM HEALTH</div>
+          </div>
+          <div class="stage" id="stage">
+            <svg class="deco" viewBox="0 0 460 460" aria-hidden="true">
+              <g class="deco-spin deco-90">
+                <circle cx="230" cy="230" r="210" class="deco-ring" stroke-dasharray="3 12"/>
+              </g>
+              <g class="deco-spin deco-55 rev">
+                <circle cx="230" cy="230" r="182" class="deco-ring" stroke-dasharray="2 22"/>
+              </g>
+              <g class="deco-spin deco-140">
+                <circle cx="230" cy="230" r="156" class="deco-ring2" stroke-dasharray="1 9"/>
+              </g>
+              <g class="deco-spin deco-200 rev">
+                <polygon points="230,118 327,174 327,286 230,342 133,286 133,174" class="deco-hex"/>
+              </g>
+              <circle cx="230" cy="20"  r="3" class="deco-node"/>
+              <circle cx="230" cy="440" r="3" class="deco-node"/>
+              <circle cx="20"  cy="230" r="3" class="deco-node"/>
+              <circle cx="440" cy="230" r="3" class="deco-node"/>
+            </svg>
+            <div class="breathe" id="breathe"></div>
+            <div class="gauge-wrap" id="gaugeWrap"></div>
+            <div class="reticle" id="reticle"></div>
+            <div class="readout" id="readout"></div>
+          </div>
+          <div class="chips" id="chips"></div>
+          <div class="core-actions">
+            <button class="primary" id="primaryBtn"><span class="primary-ico" id="primaryIco"></span>
+              <span id="primaryLabel">RUN DIAGNOSTIC</span></button>
+            <button class="fixall" id="fixAllBtn" style="display:none">
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path
+                d="M2 9 6 13 14 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span id="fixAllLabel">NEUTRALIZE ALL</span></button>
+          </div>
+        </section>
+
+        <!-- ③ right action panel -->
+        <aside class="panel">
+          <div class="panel-head">
+            <div class="chit">3</div>
+            <div class="panel-head-text">
+              <div class="panel-title" id="panelTitle">ANOMALY FEED</div>
+              <div class="panel-sub" id="panelSub">all findings</div>
+            </div>
+            <div class="panel-count" id="panelCount">0</div>
+          </div>
+          <div class="feed" id="feed"></div>
+        </aside>
+
+      </div>
+
+      <!-- bottom bar -->
+      <footer class="bottombar">
+        <div class="ticker"><div class="ticker-track" id="tickerTrack"></div></div>
+        <div class="tallies">
+          <div class="tally"><span class="tally-num open" id="tallyOpen">0</span> OPEN</div>
+          <div class="tally"><span class="tally-num fixed" id="tallyFixed">0</span> FIXED</div>
+          <button class="revert" id="revertBtn" disabled>
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path
+              d="M3 8a5 5 0 1 1 1.6 3.7" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M3 4v4h4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+            REVERT SESSION</button>
+        </div>
+      </footer>
+
+    </div><!-- /mainarea -->
+  </div><!-- /appshell -->
 
 </div><!-- /canvas -->
 </div><!-- /scaler -->

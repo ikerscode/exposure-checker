@@ -26,7 +26,7 @@
   --bg:#03070a; --p1:#050d10; --p2:#06181a;
   --text:#CFEFEA; --bright:#EAFBF7; --muted:#7FAFA8; --muted2:#6FA59C; --dim:#5E7E7E;
   --crit:#FF4D5E; --high:#FF8A3D; --med:#FFD23E; --review:#35C5FF; --info:#6E8E8E;
-  --glow:.55; --scan:.06;
+  --sidenav-w:78px;
   --raj:Rajdhani,system-ui,sans-serif;
   --chakra:"Chakra Petch",system-ui,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,monospace;
@@ -46,46 +46,67 @@ button{font-family:inherit;color:inherit;cursor:pointer;border:none;background:n
   100% 100%,var(--n) 100%,0 calc(100% - var(--n)))}
 
 /* ── Scaler / canvas ─────────────────────────────────────────────────────── */
-.scaler{position:fixed;inset:0;display:grid;place-items:center;
-  background:radial-gradient(130% 110% at 50% 8%,#0a181c 0%,#050d10 48%,#03070a 100%)}
+/* Clean, precise instrument-panel look: near-black base, one faint structural
+   grid, a soft edge vignette for depth. No ambient color wash, no scanline
+   noise, no whole-screen flicker — those compounded into a "dirty" look. Gold
+   is reserved strictly for warnings/accents, never painted across the canvas. */
+.scaler{position:fixed;inset:0;display:grid;place-items:center;background:var(--bg)}
 .canvas{position:relative;width:1440px;height:900px;display:flex;flex-direction:column;
-  transform-origin:center center;overflow:hidden;animation:gw-flick 7s linear infinite}
+  transform-origin:center center;overflow:hidden}
 
 /* ambient overlays */
 .ov{position:absolute;inset:0;pointer-events:none;z-index:0}
 .ov-grid{background:
-  linear-gradient(transparent 45px,color-mix(in srgb,var(--cy) 7%,transparent) 46px),
-  linear-gradient(90deg,transparent 45px,color-mix(in srgb,var(--cy) 7%,transparent) 46px);
-  background-size:46px 46px;opacity:.5;
+  linear-gradient(transparent 45px,color-mix(in srgb,var(--cy) 5%,transparent) 46px),
+  linear-gradient(90deg,transparent 45px,color-mix(in srgb,var(--cy) 5%,transparent) 46px);
+  background-size:46px 46px;opacity:.4;
   -webkit-mask:radial-gradient(70% 60% at 50% 45%,#000 40%,transparent 100%);
   mask:radial-gradient(70% 60% at 50% 45%,#000 40%,transparent 100%)}
-.ov-glow{background:radial-gradient(46% 40% at 50% 50%,
-  color-mix(in srgb,var(--gold) 16%,transparent),transparent 70%);opacity:var(--glow)}
-.ov-scan{background:repeating-linear-gradient(0deg,#fff 0 1px,transparent 1px 4px);
-  mix-blend-mode:overlay;opacity:var(--scan);animation:gw-scan 1.4s linear infinite}
-.ov-vignette{box-shadow:inset 0 0 200px 40px rgba(0,0,0,.6)}
+.ov-vignette{box-shadow:inset 0 0 140px 20px rgba(0,0,0,.45)}
 .canvas>:not(.ov){position:relative;z-index:1}
 
-/* ── Top bar ─────────────────────────────────────────────────────────────── */
-.topbar{height:60px;flex:none;display:flex;align-items:center;gap:24px;
-  padding:0 22px;border-bottom:1px solid color-mix(in srgb,var(--cy) 14%,transparent)}
-.brand{display:flex;align-items:center;gap:11px;min-width:210px}
+/* ── App shell: side nav + main content ─────────────────────────────────── */
+.appshell{flex:1;display:flex;min-height:0}
+.mainarea{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+
+/* ── Side nav ────────────────────────────────────────────────────────────── */
+.sidenav{width:var(--sidenav-w);flex:none;display:flex;flex-direction:column;
+  align-items:center;padding:16px 0;gap:22px;
+  border-right:1px solid color-mix(in srgb,var(--cy) 12%,transparent);
+  background:color-mix(in srgb,var(--p1) 55%,transparent)}
+.sidenav-brand{display:flex;align-items:center;justify-content:center;height:26px}
 .gull path{fill:none;stroke:var(--cy);stroke-width:2.4;stroke-linecap:round;
   filter:drop-shadow(0 0 5px var(--cy))}
-.wordmark{font-family:var(--raj);font-weight:700;font-size:20px;letter-spacing:.24em;
+.sidenav-items{flex:1;display:flex;flex-direction:column;gap:6px;width:100%;
+  align-items:center}
+.navitem{width:58px;display:flex;flex-direction:column;align-items:center;gap:5px;
+  padding:9px 0;color:var(--muted);border-left:2px solid transparent;position:relative}
+.navitem svg{display:block}
+.navitem-label{font-family:var(--raj);font-weight:600;font-size:8.5px;letter-spacing:.08em}
+.navitem:hover{color:var(--cy2)}
+.navitem.on{color:var(--cy2);border-left-color:var(--cy);
+  background:linear-gradient(90deg,color-mix(in srgb,var(--cy) 10%,transparent),transparent)}
+.navitem.on svg{filter:drop-shadow(0 0 5px var(--cy))}
+.sidenav-foot{display:flex;align-items:center;justify-content:center;padding-top:6px}
+.pip{width:7px;height:7px;border-radius:50%;background:var(--cy);
+  box-shadow:0 0 6px var(--cy);animation:gw-blink 2.4s ease-in-out infinite}
+
+/* ── Top bar ─────────────────────────────────────────────────────────────── */
+.topbar{height:56px;flex:none;display:flex;align-items:center;gap:24px;
+  padding:0 22px;border-bottom:1px solid color-mix(in srgb,var(--cy) 12%,transparent)}
+.brand-text{min-width:190px}
+.wordmark{font-family:var(--raj);font-weight:700;font-size:18px;letter-spacing:.22em;
   color:var(--bright)}
-.brand-sub{font-family:var(--mono);font-size:9px;letter-spacing:.18em;color:var(--muted)}
+.brand-sub{font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--muted)}
 .jarvis{flex:1;display:flex;align-items:center;gap:14px;min-width:0}
 .wave{display:flex;align-items:center;gap:2px;height:22px}
 .wave i{width:2px;background:var(--cy);box-shadow:0 0 5px var(--cy);
   transform-origin:center;animation:gw-wave 1s ease-in-out infinite}
 .jarvis-line{font-family:var(--mono);font-size:12.5px;color:var(--text);
   min-width:420px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.jarvis-tag{color:var(--gold);margin-right:6px}
+.jarvis-tag{color:var(--cy2);margin-right:6px}
 .status{display:flex;align-items:center;gap:9px;font-family:var(--mono);
   font-size:10px;letter-spacing:.12em;color:var(--muted)}
-.pip{width:8px;height:8px;border-radius:50%;background:var(--cy);
-  box-shadow:0 0 7px var(--cy);animation:gw-blink 2.4s ease-in-out infinite}
 .clock{font-family:var(--raj);font-weight:600;font-size:19px;color:var(--bright);
   letter-spacing:.04em;margin-left:4px}
 
@@ -138,13 +159,20 @@ button{font-family:inherit;color:inherit;cursor:pointer;border:none;background:n
 .tile-label{font-family:var(--mono);font-size:9px;letter-spacing:.16em;color:var(--muted2)}
 .tile-state{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--cy2)}
 .tile-state.warn{color:var(--high)}
-.tile-val{font-family:var(--raj);font-weight:700;font-size:33px;line-height:1;color:var(--bright)}
+.tile-val{font-family:var(--raj);font-weight:700;font-size:30px;line-height:1;color:var(--bright)}
 .tile-val .unit{font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:4px;font-weight:400}
-.meter{display:flex;gap:2px;height:7px}
-.seg{flex:1;background:rgba(255,255,255,.07);
-  clip-path:polygon(28% 0,100% 0,72% 100%,0 100%)}
-.seg.lit{background:var(--cy);box-shadow:0 0 4px var(--cy)}
-.seg.lit.gold{background:var(--gold);box-shadow:0 0 4px var(--gold)}
+.tile-graph{height:30px;margin-top:2px}
+.tile-graph svg{display:block;width:100%;height:100%;overflow:visible}
+.tile-graph .fill{fill:color-mix(in srgb,var(--cy) 20%,transparent)}
+.tile-graph .line{fill:none;stroke:var(--cy);stroke-width:1.5;stroke-linejoin:round;
+  stroke-linecap:round;filter:drop-shadow(0 0 3px color-mix(in srgb,var(--cy) 70%,transparent))}
+.tile-graph .fill.gold{fill:color-mix(in srgb,var(--gold) 20%,transparent)}
+.tile-graph .line.gold{stroke:var(--gold);
+  filter:drop-shadow(0 0 3px color-mix(in srgb,var(--gold) 70%,transparent))}
+.tile-graph .fill.warn{fill:color-mix(in srgb,var(--high) 22%,transparent)}
+.tile-graph .line.warn{stroke:var(--high);
+  filter:drop-shadow(0 0 3px color-mix(in srgb,var(--high) 70%,transparent))}
+.tile-graph .base{stroke:rgba(255,255,255,.08);stroke-width:1}
 
 /* ② core */
 .core{flex:1;display:flex;flex-direction:column;align-items:center;gap:12px;min-width:0}
@@ -188,15 +216,24 @@ button{font-family:inherit;color:inherit;cursor:pointer;border:none;background:n
 .chip.gold b{color:var(--gold)}
 .chip-dot{display:inline-block;width:8px;height:8px;margin-right:7px;vertical-align:middle;
   background:var(--info)}
+.core-actions{display:flex;gap:10px;align-items:center}
 .primary{--n:11px;display:flex;align-items:center;gap:10px;padding:13px 30px;
   font-family:var(--raj);font-weight:700;font-size:15px;letter-spacing:.14em;color:#03110f;
   background:linear-gradient(180deg,var(--cy2),var(--cy));
-  box-shadow:0 0 22px color-mix(in srgb,var(--cy) 55%,transparent);
+  box-shadow:0 0 18px color-mix(in srgb,var(--cy) 45%,transparent);
   clip-path:polygon(0 0,calc(100% - 11px) 0,100% 11px,100% 100%,11px 100%,0 calc(100% - 11px));
   transition:filter .15s,opacity .15s}
 .primary:hover{filter:brightness(1.08)}
 .primary:disabled{opacity:.4;filter:grayscale(.4);cursor:default}
 .primary-ico svg{display:block}
+.fixall{--n:11px;display:flex;align-items:center;gap:8px;padding:13px 22px;
+  font-family:var(--raj);font-weight:700;font-size:12.5px;letter-spacing:.1em;color:var(--gold);
+  background:color-mix(in srgb,var(--gold) 10%,transparent);
+  border:1px solid color-mix(in srgb,var(--gold) 45%,transparent);
+  clip-path:polygon(0 0,calc(100% - 11px) 0,100% 11px,100% 100%,11px 100%,0 calc(100% - 11px));
+  transition:filter .15s,opacity .15s}
+.fixall:hover{background:color-mix(in srgb,var(--gold) 18%,transparent)}
+.fixall:disabled{opacity:.35;cursor:default}
 
 /* ③ panel */
 .panel{width:384px;flex:none;display:flex;flex-direction:column;gap:12px;min-height:0}
@@ -237,6 +274,10 @@ button{font-family:inherit;color:inherit;cursor:pointer;border:none;background:n
 .advisory-note{font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--dim);
   margin-top:9px}
 .norev{font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--high);margin-top:7px}
+.fixerr{font-family:var(--mono);font-size:9.5px;letter-spacing:.02em;color:var(--crit);
+  margin-top:9px;padding:7px 9px;line-height:1.5;word-break:break-word;
+  background:color-mix(in srgb,var(--crit) 8%,transparent);
+  border:1px solid color-mix(in srgb,var(--crit) 30%,transparent)}
 
 /* cleaner junk rows */
 .junk{--n:8px;display:flex;align-items:center;gap:11px;padding:11px 13px;cursor:pointer;
@@ -273,15 +314,8 @@ button{font-family:inherit;color:inherit;cursor:pointer;border:none;background:n
 .meter-line.gold>i{background:var(--gold);box-shadow:0 0 6px var(--gold)}
 
 /* ── Bottom bar ──────────────────────────────────────────────────────────── */
-.bottombar{height:52px;flex:none;display:flex;align-items:center;gap:18px;padding:0 22px;
-  border-top:1px solid color-mix(in srgb,var(--cy) 14%,transparent)}
-.nav-label{font-family:var(--mono);font-size:9px;letter-spacing:.18em;color:var(--dim)}
-.nav{display:flex}
-.navbtn{font-family:var(--raj);font-weight:700;font-size:11.5px;letter-spacing:.1em;
-  padding:8px 14px;color:var(--muted);border-top:2px solid transparent}
-.navbtn:hover{color:var(--cy2)}
-.navbtn.on{color:var(--cy2);border-top-color:var(--cy);
-  background:color-mix(in srgb,var(--cy) 8%,transparent)}
+.bottombar{height:44px;flex:none;display:flex;align-items:center;gap:18px;padding:0 22px;
+  border-top:1px solid color-mix(in srgb,var(--cy) 12%,transparent)}
 .ticker{flex:1;overflow:hidden;-webkit-mask:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent);
   mask:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
 .ticker-track{display:inline-flex;white-space:nowrap;font-family:var(--mono);font-size:10px;
@@ -352,14 +386,11 @@ button{font-family:inherit;color:inherit;cursor:pointer;border:none;background:n
 @keyframes gw-fadein{from{opacity:0}to{opacity:1}}
 @keyframes gw-ticker{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 @keyframes gw-blink{0%,100%{opacity:1}50%{opacity:.25}}
-@keyframes gw-flick{0%,97%,100%{opacity:1}98%{opacity:.7}}
 @keyframes gw-swap{from{opacity:0;transform:translateY(10px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
-@keyframes gw-scan{from{background-position:0 0}to{background-position:0 14px}}
 
 /* ── Reduced motion ──────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion:reduce){
   *{animation-duration:.001ms !important;animation-iteration-count:1 !important;
     transition-duration:.001ms !important}
-  .canvas,.ov-scan,.pip,.wave i,.deco-spin,.breathe,.reticle,.ticker-track{animation:none !important}
-  .ov-scan{display:none}
+  .pip,.wave i,.deco-spin,.breathe,.reticle,.ticker-track{animation:none !important}
 }

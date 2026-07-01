@@ -20,6 +20,7 @@ const ICON = {
   trash:'<svg viewBox="0 0 18 18" width="16" height="16"><path d="M3 5h12M7 5V3h4v2M5 5l1 11h6l1-11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
   bars:'<svg viewBox="0 0 18 18" width="16" height="16"><path d="M3 15V8M8 15V3M13 15v-5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
   chip:'<svg viewBox="0 0 18 18" width="16" height="16"><rect x="5" y="5" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 2v3M11 2v3M7 13v3M11 13v3M2 7h3M2 11h3M13 7h3M13 11h3" stroke="currentColor" stroke-width="1.4"/></svg>',
+  wifi:'<svg viewBox="0 0 18 18" width="16" height="16"><path d="M2 7c4.4-4 9.6-4 14 0M4.4 10c3.1-2.6 6.1-2.6 9.2 0M7 13c1.4-1.1 2.6-1.1 4 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="9" cy="15.5" r="1.2" fill="currentColor"/></svg>',
 };
 
 /* ── modules ───────────────────────────────────────────────────────────────*/
@@ -28,28 +29,33 @@ const MODULES = [
     nav:"OVERVIEW",    primary:"RUN DIAGNOSTIC", ico:"search", feed:"ANOMALY FEED",          feedsub:"All subsystems · one-click reversible fixes" },
   { id:"perf",  num:"02", title:"PERFORMANCE TUNING",  desc:"latency · power · throughput",
     nav:"PERFORMANCE", primary:"SCAN PERFORMANCE", ico:"bolt", feed:"PERFORMANCE FINDINGS", feedsub:"tuning opportunities" },
-  { id:"sec",   num:"03", title:"SECURITY AUDIT",       desc:"exposure & hardening review",
+  { id:"net",   num:"03", title:"NETWORK",             desc:"NIC power, TCP stack & latency tuning",
+    nav:"NETWORK",     primary:"SCAN NETWORK", ico:"wifi", feed:"NETWORK FINDINGS",         feedsub:"speed & latency tweaks" },
+  { id:"sec",   num:"04", title:"SECURITY AUDIT",       desc:"exposure & hardening review",
     nav:"SECURITY",    primary:"SCAN SECURITY", ico:"shield", feed:"SECURITY FINDINGS",     feedsub:"flagged for review" },
-  { id:"clean", num:"04", title:"DISK CLEANER",         desc:"reclaimable space & debris",
+  { id:"clean", num:"05", title:"DISK CLEANER",         desc:"reclaimable space & debris",
     nav:"CLEANER",     primary:"CLEAN NOW", ico:"trash", feed:"RECLAIMABLE ITEMS",          feedsub:"tap to select" },
-  { id:"bench", num:"05", title:"BENCHMARK",            desc:"CPU · memory · storage tiers",
+  { id:"bench", num:"06", title:"BENCHMARK",            desc:"CPU · memory · storage tiers",
     nav:"BENCHMARK",   primary:"RUN BENCHMARK", ico:"bars", feed:"BENCHMARK RESULTS",       feedsub:"hardware tiers" },
-  { id:"oc",    num:"06", title:"OVERCLOCK ADVISOR",    desc:"headroom — advisory only",
+  { id:"oc",    num:"07", title:"OVERCLOCK ADVISOR",    desc:"headroom — advisory only",
     nav:"OVERCLOCK",   primary:"COPY OC PROFILE", ico:"chip", feed:"ADVISORY",              feedsub:"never auto-applied" },
 ];
 const MOD = Object.fromEntries(MODULES.map(m => [m.id, m]));
+// Modules that run a live finding-scan with a score/feed/Fix-All (as opposed to
+// the cleaner's select-then-clean flow, or the advisory-only bench/oc modules).
+const SCAN_MODULES = ["home", "perf", "net", "sec"];
 const SEV_VAR = { CRITICAL:"--crit", HIGH:"--high", MEDIUM:"--med", REVIEW:"--review", INFO:"--info" };
 const GRADE_BANDS = [["S",92,"#5BF5E4"],["A",82,"#7CFFB0"],["B",70,"#FFB23E"],
                      ["C",55,"#FFD23E"],["D",40,"#FF8A3D"],["F",0,"#FF4D5E"]];
 const gradeLetter = (s) => (GRADE_BANDS.find(b => s >= b[1]) || GRADE_BANDS[5]);
 
-const TICKER = "SECURE OFFLINE LINK ESTABLISHED /// 0 OUTBOUND CONNECTIONS /// SNAPSHOT VAULT READY /// 6 MODULES ONLINE /// NO TELEMETRY · NO ACCOUNT · NO CLOUD /// EVERY ACTION SHOWS ITS COMMAND /// ";
+const TICKER = "SECURE OFFLINE LINK ESTABLISHED /// 0 OUTBOUND CONNECTIONS /// SNAPSHOT VAULT READY /// 7 MODULES ONLINE /// NO TELEMETRY · NO ACCOUNT · NO CLOUD /// EVERY ACTION SHOWS ITS COMMAND /// ";
 
 /* ── state ─────────────────────────────────────────────────────────────────*/
 const S = {
   active:"home", scanning:false, version:"—",
   scans:{}, bench:null, oc:null,
-  live:{}, fixed:new Set(), cleanSel:new Set(),
+  live:{}, fixed:new Set(), cleanSel:new Set(), fixErrors:new Map(),
   shown:0, raf:0, reduce:REDUCE,
 };
 
@@ -140,7 +146,7 @@ function renderCore(){
   let top = "GULLWING", color = "var(--cy)", bigHTML = "—", sub = "", tag = "";
   let gaugeVal = 0;
 
-  if (m === "home" || m === "perf" || m === "sec"){
+  if (SCAN_MODULES.includes(m)){
     const sc = S.scans[m];
     const liveScore = sc ? scoreNow(m) : 0;
     color = sc ? gradeLetter(liveScore)[2] : "var(--cy)";
@@ -151,10 +157,11 @@ function renderCore(){
       sub = `<span data-score>${liveScore}</span> / 100`;
       tag = "SYSTEM INTEGRITY";
     } else {
-      top = S.scanning ? "ANALYZING" : (m === "perf" ? "PERFORMANCE" : "SECURITY");
+      const label = { perf:"PERFORMANCE", net:"NETWORK", sec:"SECURITY" }[m];
+      top = S.scanning ? "ANALYZING" : label;
       bigHTML = `<span data-score style="color:${color}">${sc ? liveScore : "—"}</span>`;
       sub = "/ 100";
-      tag = m === "perf" ? "PERFORMANCE SCORE" : "SECURITY SCORE";
+      tag = `${label} SCORE`;
     }
   } else if (m === "clean"){
     const gb = cleanSelectedGB(), tot = cleanTotalGB();
@@ -179,7 +186,7 @@ function renderCore(){
     <div class="readout-tag">${tag}</div>`;
   const cssColor = color.startsWith("var(") ? getComputedStyle(document.documentElement)
     .getPropertyValue(color.slice(4,-1)).trim() || "#35C5FF" : color;
-  buildGauge(S.scanning && (m==="home"||m==="perf"||m==="sec"||m==="bench") ? 0 : gaugeVal, cssColor);
+  buildGauge(S.scanning && (SCAN_MODULES.includes(m)||m==="bench") ? 0 : gaugeVal, cssColor);
   S.shown = gaugeVal;
 }
 
@@ -225,7 +232,7 @@ function renderChips(){
   const addSev = (label, sevVar, val) => { const ch = el("div", "chip",
     `<span class="chip-dot" style="background:var(${sevVar})"></span>${label}<b>${val}</b>`);
     c.appendChild(ch); };
-  if (m === "home" || m === "perf" || m === "sec"){
+  if (SCAN_MODULES.includes(m)){
     const sc = S.scans[m] || {counts:{}};
     addSev("HIGH", "--high", sc.counts.HIGH||0); addSev("MEDIUM", "--med", sc.counts.MEDIUM||0);
     addSev("REVIEW", "--review", sc.counts.REVIEW||0); addSev("INFO", "--info", sc.counts.INFO||0);
@@ -244,7 +251,7 @@ function renderChips(){
 /* ── feed (right panel) per module ─────────────────────────────────────────*/
 function renderFeed(){
   const f = $("feed"); f.innerHTML = ""; const m = S.active;
-  if (m === "home" || m === "perf" || m === "sec") return renderFindings(f, m);
+  if (SCAN_MODULES.includes(m)) return renderFindings(f, m);
   if (m === "clean") return renderCleaner(f);
   if (m === "bench") return renderBench(f);
   if (m === "oc")    return renderOC(f);
@@ -279,6 +286,9 @@ function buildCard(fd){
     const copy = el("button","btn btn-ghost","COPY"); copy.onclick = () => copyCmd(fd);
     act.appendChild(fix); act.appendChild(copy); card.appendChild(act);
     if (fd.revertable === false) card.appendChild(el("div","norev","⚠ CANNOT BE UNDONE"));
+    const err = S.fixErrors.get(fd.id);
+    if (err) card.appendChild(el("div","fixerr",
+      `✗ FIX FAILED — ${esc(err.cmd||"")}<br>${esc((err.out||"no output").slice(0,240))}`));
   } else {
     card.appendChild(el("div","advisory-note","RESTORE VIA · REVERT SESSION"));
   }
@@ -342,16 +352,17 @@ function renderOC(f){
 
 /* ── tallies + revert button ───────────────────────────────────────────────*/
 function renderTallies(){
-  $("tallyOpen").textContent = ["home","perf","sec"].includes(S.active) ? openCount(S.active)
+  $("tallyOpen").textContent = SCAN_MODULES.includes(S.active) ? openCount(S.active)
     : (S.active==="clean" ? [...S.cleanSel].filter(id=>!S.fixed.has(id)).length : 0);
   $("tallyFixed").textContent = S.fixed.size;
 }
 function refreshRevert(can){ $("revertBtn").disabled = !can; }
 
-/* ── header / nav / stepper ────────────────────────────────────────────────*/
+/* ── header / side nav / stepper ──────────────────────────────────────────*/
 function renderHeader(){
-  const m = MOD[S.active], idx = MODULES.findIndex(x => x.id === S.active);
+  const m = MOD[S.active];
   $("pageNum").textContent = m.num; $("counterNum").textContent = m.num;
+  $("counterTotal").textContent = String(MODULES.length).padStart(2, "0");
   // re-trigger gw-swap on the titles
   const t = $("screenTitles"); t.style.animation = "none"; void t.offsetWidth;
   t.style.animation = "";
@@ -362,16 +373,38 @@ function renderHeader(){
   const st = $("stepper"); st.innerHTML = "";
   MODULES.forEach(mm => { const d = el("div","dot"+(mm.id===S.active?" on":""));
     d.title = mm.title; d.onclick = () => switchModule(mm.id); st.appendChild(d); });
-  // nav
-  const nav = $("nav"); nav.innerHTML = "";
-  MODULES.forEach(mm => { const b = el("button","navbtn"+(mm.id===S.active?" on":""), mm.nav);
-    b.onclick = () => switchModule(mm.id); nav.appendChild(b); });
+  // side nav active state (items themselves are built once in buildSidenav)
+  document.querySelectorAll(".navitem").forEach(n =>
+    n.classList.toggle("on", n.dataset.id === S.active));
+}
+
+function buildSidenav(){
+  const host = $("sidenavItems"); host.innerHTML = "";
+  MODULES.forEach(mm => {
+    const item = el("button", "navitem" + (mm.id === S.active ? " on" : ""));
+    item.dataset.id = mm.id; item.title = mm.title;
+    item.innerHTML = `${ICON[mm.ico]||""}<span class="navitem-label">${mm.nav}</span>`;
+    item.onclick = () => switchModule(mm.id);
+    host.appendChild(item);
+  });
+}
+
+/* ── Fix All (per finding-based module) ──────────────────────────────────*/
+function renderFixAll(){
+  const btn = $("fixAllBtn"); const m = S.active;
+  if (!SCAN_MODULES.includes(m)){ btn.style.display = "none"; return; }
+  const sc = S.scans[m];
+  const ids = sc ? sc.findings.filter(f => f.fixable && !S.fixed.has(f.id)).map(f => f.id) : [];
+  if (!ids.length){ btn.style.display = "none"; return; }
+  btn.style.display = "flex";
+  $("fixAllLabel").textContent = `NEUTRALIZE ALL (${ids.length})`;
+  btn.onclick = () => onFix(ids);
 }
 
 /* ── panel count ───────────────────────────────────────────────────────────*/
 function renderPanelCount(){
   const m = S.active; let n = 0, suffix = "";
-  if (["home","perf","sec"].includes(m)){ n = (S.scans[m]?.findings.length)||0; suffix = " ACTIVE"; }
+  if (SCAN_MODULES.includes(m)){ n = (S.scans[m]?.findings.length)||0; suffix = " ACTIVE"; }
   else if (m === "clean") n = (S.scans.clean?.findings.length)||0;
   else if (m === "bench") n = (S.bench?.cards.length)||0;
   else if (m === "oc")    n = (S.oc?.cards.length)||0;
@@ -380,7 +413,7 @@ function renderPanelCount(){
 
 /* ── full render of the dynamic regions ────────────────────────────────────*/
 function render(){ renderHeader(); renderCore(); renderChips(); renderFeed();
-  renderPanelCount(); renderTallies(); }
+  renderPanelCount(); renderTallies(); renderFixAll(); }
 
 /* ── actions ───────────────────────────────────────────────────────────────*/
 function setBusy(b){ S.scanning = b; $("stage").classList.toggle("busy", b);
@@ -415,10 +448,35 @@ async function loadOC(){
 
 async function onPrimary(){
   const m = S.active;
-  if (m === "home" || m === "perf" || m === "sec") return runScan(m);
+  if (SCAN_MODULES.includes(m)) return runScan(m);
   if (m === "bench") return runBenchmark();
   if (m === "clean") return doClean();
   if (m === "oc") return copyOCProfile();
+}
+
+/* A batch can mix commands from several findings — one failing command must
+   not blank out the others. The bridge (_wrap_results) already reports each
+   finding's own pass/fail; this renders that as real, specific feedback
+   instead of a bare "Fix failed" that hides which one broke and why. */
+function reportFixOutcome(res, verb){
+  const fixed = res.fixed || [], failed = res.failed || [];
+  fixed.forEach(id => { S.fixed.add(id); S.fixErrors.delete(id); });
+  failed.forEach(f => S.fixErrors.set(f.id, f));
+  render();
+  if (!failed.length){
+    toast(`${verb} ${fixed.length} — snapshot saved.`);
+    jarvis("Done. Snapshot saved — fully reversible via Revert Session.");
+    return;
+  }
+  const first = failed[0];
+  const detail = (first.out || "no output").slice(0, 160);
+  if (fixed.length){
+    toast(`${fixed.length} neutralised, ${failed.length} failed — "${first.label}": ${detail}`);
+    jarvis(`${fixed.length} fixed, ${failed.length} failed. ${first.label}: ${detail}`);
+  } else {
+    toast(`Fix failed — "${first.label}": ${detail}`);
+    jarvis(`Fix failed. ${first.label}: ${detail}`);
+  }
 }
 
 async function onFix(ids){
@@ -427,17 +485,14 @@ async function onFix(ids){
     closeModal();
     jarvis("Applying fix — you may be asked to authorise…");
     const res = await api("apply_fix", ids);
-    if (!res || !res.ok){
-      if (res && res.denied){ showDenied(res.preview); return; }
-      toast((res && res.reason) ? res.reason : "Fix failed."); jarvis("Fix did not complete.");
-      return;
+    if (!res){ toast("Fix failed — no response from the bridge."); jarvis("Fix did not complete."); return; }
+    if (res.denied){ showDenied(res.preview); return; }
+    if (res.reason && !(res.fixed || []).length && !(res.failed || []).length){
+      toast(res.reason); jarvis("Fix did not complete."); return;
     }
-    res.fixed.forEach(id => S.fixed.add(id));
     refreshRevert(res.can_revert);
-    render();
+    reportFixOutcome(res, "Neutralised");
     animateCore(scoreNow(S.active), gradeLetter(scoreNow(S.active))[2]);
-    toast(`Neutralised ${res.fixed.length} — snapshot saved.`);
-    jarvis("Done. Snapshot saved — fully reversible via Revert Session.");
   });
 }
 
@@ -448,11 +503,18 @@ async function doClean(){
   showConfirm(info, async () => {
     closeModal(); jarvis("Reclaiming space…");
     const res = await api("clean", ids);
-    if (!res || !res.ok){ if (res && res.denied){ showDenied(res.preview); return; }
-      toast((res && res.reason)||"Clean failed."); return; }
-    res.fixed.forEach(id => S.fixed.add(id));
-    render(); toast(`Reclaimed ${res.reclaimed_gb} GB.`);
-    jarvis(`Reclaimed ${res.reclaimed_gb} GB of disk space.`);
+    if (!res){ toast("Clean failed — no response from the bridge."); return; }
+    if (res.denied){ showDenied(res.preview); return; }
+    if (res.reason && !(res.fixed || []).length && !(res.failed || []).length){
+      toast(res.reason); return;
+    }
+    const failed = res.failed || [];
+    if (!failed.length){
+      render(); toast(`Reclaimed ${res.reclaimed_gb} GB.`);
+      jarvis(`Reclaimed ${res.reclaimed_gb} GB of disk space.`);
+    } else {
+      reportFixOutcome({...res, fixed: res.fixed, failed}, "Cleaned");
+    }
   }, true);
 }
 
@@ -470,7 +532,7 @@ async function onRevert(){
   if (!res || !res.ok){ toast((res && res.reason)||"Revert reported issues."); }
   S.fixed.clear(); refreshRevert(false);
   // refresh current finding module so cards reappear as open
-  if (["home","perf","sec"].includes(S.active)) await runScan(S.active); else render();
+  if (SCAN_MODULES.includes(S.active)) await runScan(S.active); else render();
   toast("Session reverted — all fixes undone.");
   jarvis("Session reverted. Every change has been rolled back.");
 }
@@ -530,22 +592,28 @@ function switchModule(id){
   jarvis(`${m.title} — ${m.desc}.`);
   // auto-load advisory/benchmark-free modules lazily
   if (id === "oc" && !S.oc) loadOC();
-  if (["home","perf","sec"].includes(id) && S.scans[id])
+  if (SCAN_MODULES.includes(id) && S.scans[id])
     animateCore(scoreNow(id), gradeLetter(scoreNow(id))[2]);
 }
 
-/* ── live sensors ──────────────────────────────────────────────────────────*/
+/* ── live sensors: Task-Manager-style sparkline tiles ────────────────────
+   The bridge samples hardware on its own steady 1-second thread (see
+   Bridge._sample_loop in bridge.py) and hands us both the latest reading and
+   a rolling history buffer per sensor — we just draw it. Sampling on the poll
+   timer itself (the old approach) made values snap to 0 between polls because
+   two psutil.cpu_percent() calls close together measure a near-empty window. */
 const SENSORS = [
   { key:"cpu",  label:"CPU LOAD", unit:"%",  fmt:v=>Math.round(v),
-    sub:v=>v>82?["HEAVY",true]:["NOMINAL",false], pct:v=>v },
+    sub:v=>v>82?["HEAVY",true]:["NOMINAL",false], domain:()=>[0,100] },
   { key:"temp", label:"CPU TEMP", unit:"°C", fmt:v=>Math.round(v),
-    sub:v=>v>70?["WARM",true]:["NOMINAL",false], pct:v=>clamp((v-30)/60*100,0,100) },
+    sub:v=>v>75?["WARM",true]:["NOMINAL",false], domain:()=>[25,95] },
   { key:"ram",  label:"MEMORY",   unit:"GB", fmt:(v,d)=>`${v}`,
-    sub:(v,d)=>[`/ ${d.ram_total||"—"} GB`,false], pct:(v,d)=>d.ram_total?v/d.ram_total*100:0, gold:true },
+    sub:(v,d)=>[`/ ${d.ram_total||"—"} GB`,false], domain:(v,d)=>[0, d.ram_total||32], gold:true },
   { key:"disk", label:"STORAGE",  unit:"%",  fmt:v=>Math.round(v),
-    sub:(v,d)=>[`${d.disk_free??"—"} GB FREE`,false], pct:v=>v },
+    sub:(v,d)=>[`${d.disk_free??"—"} GB FREE`,false], domain:()=>[0,100] },
   { key:"net",  label:"NETWORK",  unit:"KB/s", fmt:v=>Math.round(v),
-    sub:(v,d)=>[d.vpn?"VPN UP":"NO VPN",false], pct:v=>clamp(v/500*100,0,100) },
+    sub:(v,d)=>[d.vpn?"VPN UP":"NO VPN",false],
+    domain:(v,d,hist)=>[0, Math.max(80, ...(hist||[0]))*1.15] },
 ];
 function buildSensors(){
   const host = $("sensors"); host.innerHTML = "";
@@ -554,27 +622,41 @@ function buildSensors(){
     tile.innerHTML = `<div class="tile-top"><span class="tile-label">${s.label}</span>
         <span class="tile-state"></span></div>
       <div class="tile-val"><span class="v">—</span><span class="unit">${s.unit}</span></div>
-      <div class="meter">${'<i class="seg"></i>'.repeat(22)}</div>`;
+      <div class="tile-graph"><svg viewBox="0 0 100 30" preserveAspectRatio="none">
+        <line class="base" x1="0" y1="29.5" x2="100" y2="29.5"/>
+        <path class="fill"/><path class="line"/>
+      </svg></div>`;
     host.appendChild(tile);
   });
 }
+function sparkPaths(hist, lo, hi){
+  const n = hist.length; if (n < 2) return { line:"", fill:"" };
+  const w = 100, h = 30, span = Math.max(1e-6, hi - lo);
+  const pts = hist.map((v,i) => [ (i/(n-1))*w, h - clamp((v-lo)/span,0,1)*h ]);
+  const line = pts.map((p,i) => (i===0?"M":"L")+p[0].toFixed(2)+","+p[1].toFixed(2)).join(" ");
+  return { line, fill: `${line} L${w},${h} L0,${h} Z` };
+}
 function paintSensors(){
-  const d = S.live;
+  const d = S.live, hist = d.hist || {};
   SENSORS.forEach(s => {
     const tile = document.querySelector(`.tile[data-k="${s.key}"]`); if (!tile) return;
-    const v = d[s.key];
+    const v = d[s.key], h = hist[s.key] || [];
     tile.querySelector(".v").textContent = (v==null) ? "—" : s.fmt(v, d);
-    const [stext, warn] = (v==null) ? ["—",false] : s.sub(v, d);
+    const [stext, warn] = (v==null) ? ["—",false] : s.sub(v, d, h);
     const st = tile.querySelector(".tile-state"); st.textContent = stext;
     st.classList.toggle("warn", !!warn);
-    const lit = (v==null) ? 0 : Math.round(clamp(s.pct(v, d),0,100)/100*22);
-    tile.querySelectorAll(".seg").forEach((seg,i) => {
-      seg.classList.toggle("lit", i < lit); seg.classList.toggle("gold", !!s.gold); });
+    const [lo, hi] = s.domain(v, d, h);
+    const { line, fill } = sparkPaths(h, lo, hi);
+    const tone = warn ? "warn" : (s.gold ? "gold" : "");
+    const lineEl = tile.querySelector(".line"), fillEl = tile.querySelector(".fill");
+    lineEl.setAttribute("d", line); fillEl.setAttribute("d", fill);
+    lineEl.className.baseVal = "line" + (tone?" "+tone:"");
+    fillEl.className.baseVal = "fill" + (tone?" "+tone:"");
   });
 }
 async function pollSensors(){
   try{ S.live = await api("live_sensors") || {}; paintSensors(); }catch(e){}
-  setTimeout(pollSensors, 1100);
+  setTimeout(pollSensors, 1000);
 }
 
 /* ── boot sequence ─────────────────────────────────────────────────────────*/
@@ -599,12 +681,11 @@ function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,
 
 /* ── init ──────────────────────────────────────────────────────────────────*/
 async function init(){
-  buildWave(); buildTicker(); buildSensors(); tickClock();
+  buildWave(); buildTicker(); buildSensors(); buildSidenav(); tickClock();
   setInterval(tickClock, 1000);
   fit(); window.addEventListener("resize", fit);
   $("primaryBtn").onclick = onPrimary;
   $("revertBtn").onclick = onRevert;
-  if (S.reduce){ $("ovScan").style.display="none"; }
 
   // Wait for the Python bridge before any real call, so we never silently run
   // on Mock data in the packaged app.
@@ -648,6 +729,8 @@ window.addEventListener("DOMContentLoaded", init);
 const Mock = (() => {
   const rnd = (a,b) => a + Math.random()*(b-a);
   let liveBase = { cpu:24, temp:54, ram:11.2, ram_total:32, disk:61, disk_free:421, net:12, vpn:false };
+  const mockHist = { cpu:[], temp:[], ram:[], disk:[], net:[] };
+  Object.keys(mockHist).forEach(k => { for (let i=0;i<48;i++) mockHist[k].push(liveBase[k]||0); });
   const F = (sev,title,desc,cmd,pts,rev=true) => ({ id:title.replace(/\W/g,"").slice(0,12),
     sev, title, desc, fix:"see command", command:cmd, commands:cmd?[cmd]:[], points:pts,
     revertable:rev, fixable:!!cmd, fixed:false });
@@ -660,6 +743,8 @@ const Mock = (() => {
     perf:[ F("REVIEW","CPU governor: powersave","Switch to performance for max clocks.","cpupower frequency-set -g performance",1,false),
            F("REVIEW","Swappiness is 60","Lower it to favour RAM.","sysctl -w vm.swappiness=10",1),
            F("INFO","Transparent Huge Pages: madvise","Informational.","",0) ],
+    net:[ F("REVIEW","TCP receive buffer cap is 4 MB","16 MB+ absorbs bursts from game servers without drops.","sysctl -w net.core.rmem_max=16777216",1,false),
+          F("REVIEW","irqbalance is not running","All NIC/disk interrupts land on CPU0 under load.","systemctl enable --now irqbalance",1,false) ],
     clean:[ {...F("MEDIUM","Temporary files","User temp cache","rm -rf /tmp/*",3,false), _gb:2.4},
             {...F("REVIEW","Package cache","apt archives","apt clean",1,false), _gb:1.8},
             {...F("REVIEW","Browser caches","Chromium/Firefox","",1,false), _gb:1.1},
@@ -672,24 +757,26 @@ const Mock = (() => {
   const fixedSet = new Set();
   return {
     app_info:()=>({version:"2.0.0-mock",os:"Linux",is_root:false,elevation:true,incomplete_sessions:0}),
-    live_sensors:()=>{ liveBase.cpu=clamp(liveBase.cpu+rnd(-12,12),5,95);
-      liveBase.temp=clamp(liveBase.temp+rnd(-2,2),42,80); liveBase.net=clamp(liveBase.net+rnd(-8,12),0,300);
-      liveBase.ram=clamp(liveBase.ram+rnd(-.6,.6),6,30);
-      return {...liveBase, cpu:Math.round(liveBase.cpu), temp:Math.round(liveBase.temp),
-        ram:Math.round(liveBase.ram*10)/10, net:Math.round(liveBase.net)}; },
-    scan:(m)=>{ const fs = (m==="home") ? [...SEED.sec,...SEED.perf]
+    live_sensors:()=>{ liveBase.cpu=clamp(liveBase.cpu+rnd(-10,10),5,95);
+      liveBase.temp=clamp(liveBase.temp+rnd(-1.2,1.2),42,80); liveBase.net=clamp(liveBase.net+rnd(-8,14),0,300);
+      liveBase.ram=clamp(liveBase.ram+rnd(-.4,.4),6,30);
+      const snap = {cpu:Math.round(liveBase.cpu), temp:Math.round(liveBase.temp),
+        ram:Math.round(liveBase.ram*10)/10, disk:liveBase.disk, net:Math.round(liveBase.net)};
+      Object.keys(mockHist).forEach(k => { mockHist[k].push(snap[k]??0); if (mockHist[k].length>48) mockHist[k].shift(); });
+      return {...liveBase, ...snap, hist:mockHist}; },
+    scan:(m)=>{ const fs = (m==="home") ? [...SEED.sec,...SEED.perf,...SEED.net]
         : (SEED[m]||[]); const s=score(fs), g=grade(s);
       return {module:m, score:s, grade:g[0], gradeColor:g[2],
         findings:fs.map(f=>({...f})), counts:counts(fs)}; },
-    confirm_fix:(ids)=>{ const all=[...SEED.sec,...SEED.perf,...SEED.clean];
+    confirm_fix:(ids)=>{ const all=[...SEED.sec,...SEED.perf,...SEED.net,...SEED.clean];
       const sel=all.filter(f=>ids.includes(f.id));
       return {count:sel.length, commands:sel.map(f=>"sudo "+f.command),
         revertable:sel.every(f=>f.revertable!==false),
         non_revertable:sel.filter(f=>f.revertable===false).map(f=>f.title),
         is_root:false, elevation:true}; },
     apply_fix:(ids)=>{ ids.forEach(i=>fixedSet.add(i));
-      return {ok:true, results:ids.map(i=>({cmd:i,rc:0,ok:true,out:""})), fixed:ids, can_revert:true}; },
-    clean:(ids)=>({ok:true,results:[],fixed:ids,reclaimed_gb:Math.round(ids.length*1.4*10)/10}),
+      return {ok:true, results:ids.map(i=>({cmd:i,rc:0,ok:true,out:""})), fixed:ids, failed:[], can_revert:true}; },
+    clean:(ids)=>({ok:true,results:[],fixed:ids,failed:[],reclaimed_gb:Math.round(ids.length*1.4*10)/10}),
     revert_session:()=>({ok:true,results:[{action:"restore sshd_config",ok:true,detail:""}]}),
     benchmark:()=>({cpu:88,gpu:null,mem:98,disk:62,index:83,cards:[
       {name:"PROCESSOR",score:88,tier:"A",note:"Strong single-thread throughput."},

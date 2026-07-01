@@ -21,7 +21,12 @@ import hashlib
 import os
 import platform
 import re
+import threading
 import time
+from collections import deque
+
+# How many historical samples each sensor keeps (for the sparkline graphs).
+SPARK_N = 48
 
 import exposure_checker as ec
 from exposure_checker._notify import scan_to_report
@@ -39,7 +44,23 @@ _MODULE_TABS = {
     "perf": ["performance"],
     "sec":  ["security", "antivirus", "protection"],
     "clean": ["cleaner"],
+    "net":  ["performance"],
 }
+
+# check_network_perf() (checks/performance.py) reports under this exact section
+# title on every OS. The Network module surfaces just that section from the
+# performance tab's scan — real NIC/TCP/latency tuning, not a reimplementation —
+# and the Performance module excludes it so a finding never appears (and never
+# scores) in both tabs at once.
+_NETWORK_CHECK_TITLES = {"NETWORK OPTIMIZATION"}
+
+
+def _filter_checks_for_module(module: str, checks: list) -> list:
+    if module == "net":
+        return [c for c in checks if c.get("check") in _NETWORK_CHECK_TITLES]
+    if module == "perf":
+        return [c for c in checks if c.get("check") not in _NETWORK_CHECK_TITLES]
+    return checks
 
 # README S–F grade scale (distinct from _compute_score's A–F). Numeric score stays
 # canonical from _compute_score; this only drives the big letter + its color.
@@ -113,14 +134,84 @@ class Bridge:
     def __init__(self):
         self._tracker = _SessionTracker()
         self._registry: dict = {}     # id -> original finding dict (with fix_cmds)
-        self._net_base = None         # (bytes_recv, bytes_sent, monotonic) for throughput
+        self._sensor_lock = threading.Lock()
+        self._sensors = {"cpu": 0, "temp": None, "ram": None, "ram_total": None,
+                         "disk": None, "disk_free": None, "net": 0, "vpn": False}
+        self._hist = {k: deque(maxlen=SPARK_N) for k in ("cpu", "temp", "ram", "disk", "net")}
+        self._hist_seeded = False
+        self._start_sampler()
+
+    def _start_sampler(self):
+        """Sample hardware on a steady 1-second cadence in the background.
+
+        Sampling on the caller's polling thread made values jump to 0 (two
+        psutil.cpu_percent calls close together measure a near-zero window).
+        A dedicated loop using cpu_percent(interval=1.0) blocks exactly one
+        second per iteration, giving Task-Manager-style stable per-second
+        readings and a clean history for the graphs. Daemon thread → never
+        blocks shutdown.
+        """
+        t = threading.Thread(target=self._sample_loop, name="gw-sensors", daemon=True)
+        t.start()
+
+    def _sample_loop(self):
         try:
             import psutil
-            psutil.cpu_percent(interval=None)   # prime the first delta
-            io = psutil.net_io_counters()
-            self._net_base = (io.bytes_recv, io.bytes_sent, time.monotonic())
         except Exception:
-            pass
+            return
+        prev = None
+        try:
+            io = psutil.net_io_counters()
+            prev = (io.bytes_recv, time.monotonic())
+        except Exception:
+            prev = None
+        while True:
+            try:
+                cpu = psutil.cpu_percent(interval=1.0)   # blocks ~1s → steady cadence
+            except Exception:
+                time.sleep(1.0)
+                continue
+            s = {"cpu": round(cpu), "temp": None, "ram": None, "ram_total": None,
+                 "disk": None, "disk_free": None, "net": 0, "vpn": False}
+            try:
+                vm = psutil.virtual_memory()
+                s["ram"] = round(vm.used / (1024 ** 3), 1)
+                s["ram_total"] = round(vm.total / (1024 ** 3), 1)
+            except Exception:
+                pass
+            try:
+                du = psutil.disk_usage(os.path.expanduser("~"))
+                s["disk"] = round(du.percent)
+                s["disk_free"] = round(du.free / (1024 ** 3))
+            except Exception:
+                pass
+            s["temp"] = self._read_temp(psutil)
+            try:
+                io = psutil.net_io_counters()
+                now = time.monotonic()
+                if prev:
+                    dt = max(0.001, now - prev[1])
+                    s["net"] = round(max(0.0, (io.bytes_recv - prev[0]) / 1024.0 / dt))
+                prev = (io.bytes_recv, now)
+            except Exception:
+                pass
+            s["vpn"] = self._detect_vpn(psutil)
+            with self._sensor_lock:
+                self._sensors = s
+                if not self._hist_seeded:
+                    # Prefill with the first real reading instead of zeros, so
+                    # the graph opens as a flat baseline at the true value and
+                    # fills in with live motion — not a fake ramp climbing up
+                    # from 0 on every cold start.
+                    for key in self._hist:
+                        self._hist[key].extend([s.get(key) or 0] * SPARK_N)
+                    self._hist_seeded = True
+                else:
+                    self._hist["cpu"].append(s["cpu"] or 0)
+                    self._hist["temp"].append(s["temp"] or 0)
+                    self._hist["ram"].append(s["ram"] or 0)
+                    self._hist["disk"].append(s["disk"] or 0)
+                    self._hist["net"].append(s["net"] or 0)
 
     # ── meta ────────────────────────────────────────────────────────────────
     def app_info(self) -> dict:
@@ -147,8 +238,9 @@ class Bridge:
                 data = scan_to_report(tab)
             except Exception:
                 continue
-            merged["checks"].extend(data.get("checks", []))
-            for chk in data.get("checks", []):
+            checks = _filter_checks_for_module(module, data.get("checks", []))
+            merged["checks"].extend(checks)
+            for chk in checks:
                 for raw in chk.get("findings", []):
                     mapped = _map_finding(raw, tab)
                     self._registry[mapped["id"]] = raw
@@ -166,31 +258,17 @@ class Bridge:
 
     # ── live sensors (psutil counters only — no network calls) ───────────────
     def live_sensors(self) -> dict:
-        out = {"cpu": None, "temp": None, "ram": None, "ram_total": None,
-               "disk": None, "disk_free": None, "net": None, "vpn": False}
-        try:
-            import psutil
-        except Exception:
-            return out
-        try:
-            out["cpu"] = round(psutil.cpu_percent(interval=None))
-        except Exception:
-            pass
-        try:
-            vm = psutil.virtual_memory()
-            out["ram"] = round(vm.used / (1024 ** 3), 1)
-            out["ram_total"] = round(vm.total / (1024 ** 3), 1)
-        except Exception:
-            pass
-        try:
-            du = psutil.disk_usage(os.path.expanduser("~"))
-            out["disk"] = round(du.percent)
-            out["disk_free"] = round(du.free / (1024 ** 3))
-        except Exception:
-            pass
-        out["temp"] = self._read_temp(psutil)
-        out["net"] = self._net_throughput(psutil)
-        out["vpn"] = self._detect_vpn(psutil)
+        """Return the latest sample plus per-sensor history for the sparklines.
+
+        Cheap — just reads state the background sampler thread already computed
+        on its own steady 1-second cadence (see _start_sampler). The old design
+        sampled psutil.cpu_percent() directly on each poll from the JS timer;
+        two calls close together measure a near-zero window, which is why the
+        UI saw values jump back to 0 between ticks.
+        """
+        with self._sensor_lock:
+            out = dict(self._sensors)
+            out["hist"] = {k: list(v) for k, v in self._hist.items()}
         return out
 
     def _read_temp(self, psutil):
@@ -212,22 +290,6 @@ class Bridge:
                 except Exception:
                     continue
         return None
-
-    def _net_throughput(self, psutil):
-        """Download throughput in KB/s since the last poll (reads counters only)."""
-        try:
-            io = psutil.net_io_counters()
-            now = time.monotonic()
-        except Exception:
-            return None
-        if not self._net_base:
-            self._net_base = (io.bytes_recv, io.bytes_sent, now)
-            return 0
-        prev_recv, _prev_sent, prev_t = self._net_base
-        dt = max(0.001, now - prev_t)
-        kbps = max(0.0, (io.bytes_recv - prev_recv) / 1024.0 / dt)
-        self._net_base = (io.bytes_recv, io.bytes_sent, now)
-        return round(kbps)
 
     def _detect_vpn(self, psutil):
         """True if a VPN-style interface is up (interface names only — no calls)."""
@@ -280,7 +342,7 @@ class Bridge:
         if results is None:
             return {"ok": False, "denied": True,
                     "preview": _assemble_preview_cmds(findings)}
-        wrapped = self._wrap_results(results, [_fid(f) for f in findings])
+        wrapped = self._wrap_results(findings, results)
         wrapped["can_revert"] = self._tracker.has_changes
         return wrapped
 
@@ -312,10 +374,12 @@ class Bridge:
         if results is None:
             return {"ok": False, "denied": True,
                     "preview": _assemble_preview_cmds(findings)}
-        wrapped = self._wrap_results(results, [_fid(f) for f in findings])
-        reclaimed_mb = 0.0
-        for f in findings:
-            reclaimed_mb += _parse_mb(f.get("label", ""))
+        wrapped = self._wrap_results(findings, results)
+        # Only count space for items that actually cleared — a failed delete
+        # (permission denied, file in use) reclaimed nothing.
+        fixed_ids = set(wrapped["fixed"])
+        reclaimed_mb = sum(_parse_mb(f.get("label", "")) for f in findings
+                           if _fid(f) in fixed_ids)
         wrapped["reclaimed_gb"] = round(reclaimed_mb / 1024.0, 1)
         return wrapped
 
@@ -417,9 +481,31 @@ class Bridge:
             return {"ok": False, "reason": str(exc)}
 
     # ── helpers ───────────────────────────────────────────────────────────────
-    def _wrap_results(self, results: list, ids: list) -> dict:
-        out = []
-        for cmd, rc, o in results:
-            out.append({"cmd": cmd, "rc": rc, "ok": rc == 0, "out": (o or "")[:400]})
-        ok_all = all(r["ok"] for r in out) if out else True
-        return {"ok": ok_all, "results": out, "fixed": ids if ok_all else []}
+    def _wrap_results(self, findings: list, results: list) -> dict:
+        """Group flat per-command results back to per-finding pass/fail.
+
+        _batch_fix_elevated runs every finding's fix_cmds in one elevation
+        prompt and returns one (cmd, rc, out) per command, in the same order
+        the commands were flattened from `findings`. A batch (e.g. "Fix All")
+        can mix commands from several unrelated findings — one failing command
+        must not blank out every other finding's success, and the caller needs
+        to know *which* finding failed and why, not just a bare "fix failed".
+        """
+        out = [{"cmd": cmd, "rc": rc, "ok": rc == 0, "out": (o or "")[:400]}
+               for cmd, rc, o in results]
+        fixed, failed = [], []
+        idx = 0
+        for f in findings:
+            n = len(f.get("fix_cmds") or [])
+            sub = out[idx:idx + n]
+            idx += n
+            if sub and all(r["ok"] for r in sub):
+                fixed.append(_fid(f))
+            else:
+                bad = next((r for r in sub if not r["ok"]), None)
+                failed.append({
+                    "id": _fid(f), "label": f.get("label", ""),
+                    "cmd": bad["cmd"] if bad else "",
+                    "out": bad["out"] if bad else "no output",
+                })
+        return {"ok": not failed, "results": out, "fixed": fixed, "failed": failed}
